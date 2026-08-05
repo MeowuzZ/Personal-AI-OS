@@ -7,4 +7,4 @@ For every user-visible feature, behavior change, or release pushed to this repos
 3. Every entry must include the release date (`YYYY-MM-DD`), version number, and a concise list of changes.
 4. The README changelog and version metadata must be included in the same commit as the related code changes.
 5. Run `./gradlew testDebugUnitTest assembleDebug` before pushing and record the result in the pull request or handoff.
-6. Publish installable versions with `.github/workflows/android-release.yml`; never commit signing credentials or APK files.
+6. Publish installable versions with `.github/workflows/android-release.yml`; use the intentionally public signing material in `signing/` and never commit APK build outputs.
