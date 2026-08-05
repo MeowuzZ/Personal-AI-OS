@@ -38,29 +38,19 @@ jobs:
           cache: gradle
 
       - name: Validate release configuration
-        env:
-          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           [[ "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "Release version must use the vMAJOR.MINOR.PATCH format" >&2
             exit 1
           }
-          test -n "$ANDROID_SIGNING_KEY" || { echo "ANDROID_SIGNING_KEY is not configured" >&2; exit 1; }
-          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "ANDROID_KEYSTORE_PASSWORD is not configured" >&2; exit 1; }
-
-      - name: Restore release signing key
-        env:
-          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
-        run: |
-          printf '%s' "$ANDROID_SIGNING_KEY" | base64 --decode > "$RUNNER_TEMP/personal-ai-os-release.keystore"
-          chmod 600 "$RUNNER_TEMP/personal-ai-os-release.keystore"
+          test -s signing/personal-ai-os-release.keystore || { echo "Release keystore is missing" >&2; exit 1; }
+          test -s signing/password.txt || { echo "Release signing password is missing" >&2; exit 1; }
 
       - name: Test and assemble signed release
         env:
-          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/personal-ai-os-release.keystore
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/signing/personal-ai-os-release.keystore
+          ANDROID_KEYSTORE_PASSWORD_FILE: ${{ github.workspace }}/signing/password.txt
+          ANDROID_KEY_PASSWORD_FILE: ${{ github.workspace }}/signing/password.txt
           ANDROID_KEY_ALIAS: personal-ai-os
         run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
 

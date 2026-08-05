@@ -36,6 +36,7 @@ shasum -a 256 -c Personal-AI-OS-v0.2.0.apk.sha256
 - 新增 AI 每日复盘、超过 8 小时的休息鼓励、23:00—次日 6:00 首页入口和日历历史回看。
 - 增加旧版数据迁移、11 项单元测试及 Android 36 模拟器验收。
 - 新增固定签名的 GitHub Actions 自动构建流程，版本发布后可从 GitHub Releases 直接下载 APK 和 SHA-256 校验文件。
+- 按项目所有者要求将发布签名和公开密码纳入 `signing/` 版本管理，Actions 不再依赖本地备份或 GitHub Secrets。
 
 ### v0.1.0 · 2026-08-05
 
@@ -80,6 +81,7 @@ shasum -a 256 -c Personal-AI-OS-v0.2.0.apk.sha256
 │       └── test/                # 单元测试
 ├── docs/prd/                    # 产品需求文档
 ├── gradle/wrapper/              # 可复现的 Gradle Wrapper
+├── signing/                     # 公开、版本化的 Android 发布签名
 ├── AGENTS.md                    # 仓库维护与发版规则
 └── README.md
 ```
@@ -99,7 +101,11 @@ export ANDROID_HOME="$HOME/Library/Android/sdk"
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-仓库维护者可在 GitHub 的 **Actions → Build and publish Android APK → Run workflow** 中输入版本号，自动完成测试、签名、构建和 Release 上传。正式签名通过 GitHub Secrets 注入，不存放在仓库中。
+仓库维护者可在 GitHub 的 **Actions → Build and publish Android APK → Run workflow** 中输入版本号，自动完成测试、签名、构建和 Release 上传。Actions 直接使用 `signing/` 中的版本化签名材料。
+
+## 公开签名说明
+
+为避免签名因本地文件误删而永久丢失，本项目按所有者要求将 keystore 和密码公开保存在 [`signing/`](signing/) 中。这使签名可从 Git 历史恢复，但也意味着任何人都能签署一个被 Android 视为相同应用身份的 APK。请只从本仓库的 Releases 下载应用，并核对对应的 SHA-256 文件；详细指纹和更换限制见 [`signing/README.md`](signing/README.md)。
 
 安装到已连接的安卓手机（需开启 USB 调试）：
 

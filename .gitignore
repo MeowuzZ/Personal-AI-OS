@@ -14,5 +14,6 @@ local.properties
 /.signing-backup/
 *.jks
 *.keystore
+!signing/personal-ai-os-release.keystore
 *.apk
 *.aab
