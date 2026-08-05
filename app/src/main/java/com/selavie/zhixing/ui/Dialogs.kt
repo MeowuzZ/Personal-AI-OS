@@ -15,9 +15,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -25,6 +22,7 @@ import com.selavie.zhixing.data.SmartEngine
 import com.selavie.zhixing.model.*
 import com.selavie.zhixing.ui.theme.*
 import java.time.LocalDate
+import java.time.LocalDateTime
 
 @Composable
 private fun DialogShell(
@@ -112,31 +110,41 @@ fun CaptureDialog(engine: SmartEngine, onDismiss: () -> Unit, onConfirm: (Captur
 
 @Composable
 fun TaskEditorDialog(task: TaskItem?, onDismiss: () -> Unit, onSave: (TaskItem) -> Unit) {
+    val engine = remember { SmartEngine() }
     var title by remember(task?.id) { mutableStateOf(task?.title.orEmpty()) }
-    var due by remember(task?.id) { mutableStateOf(task?.dueDate ?: LocalDate.now().toString()) }
-    var startTime by remember(task?.id) { mutableStateOf(task?.scheduledTime ?: "09:00") }
-    var estimate by remember(task?.id) { mutableStateOf((task?.estimateMinutes ?: 30).toString()) }
+    var due by remember(task?.id) { mutableStateOf(DateWheelValue.from(task?.dueDate)) }
+    var startTime by remember(task?.id) { mutableStateOf(TimeWheelValue.from(task?.scheduledTime, java.time.LocalTime.of(9, 0))) }
+    var durationInput by remember(task?.id) { mutableStateOf(task?.durationInput?.ifBlank { null } ?: durationText(task?.estimateMinutes ?: 30)) }
     var content by remember(task?.id) { mutableStateOf(task?.content.orEmpty()) }
     var tags by remember(task?.id) { mutableStateOf(task?.tags?.joinToString("，").orEmpty()) }
     var priority by remember(task?.id) { mutableStateOf(task?.priority ?: Priority.MEDIUM) }
-    val duration = estimate.toIntOrNull()
-    val formValid = title.isNotBlank() &&
-        runCatching { LocalDate.parse(due) }.isSuccess &&
-        runCatching { java.time.LocalTime.parse(startTime) }.isSuccess &&
-        duration != null && duration in 1..1440
-    DialogShell(if (task == null) "新建任务" else "编辑任务", "填写完整时间信息；持续时间上限为 24 小时。", onDismiss) {
+    var invalidDate by remember { mutableStateOf(false) }
+    var overdueTask by remember { mutableStateOf<TaskItem?>(null) }
+    val duration = engine.parseDurationMinutes(durationInput)
+    val formValid = title.isNotBlank() && duration != null
+    fun result(date: LocalDate): TaskItem = (task ?: TaskItem(title = title.trim())).copy(
+        title = title.trim(),
+        dueDate = date.toString(),
+        scheduledTime = startTime.asText(),
+        estimateMinutes = duration ?: 30,
+        durationInput = durationInput.trim(),
+        content = content.trim(),
+        tags = tags.split(',', '，').map(String::trim).filter(String::isNotBlank).distinct(),
+        priority = priority,
+    )
+    DialogShell(if (task == null) "新建任务" else "编辑任务", "持续时间支持自然语言，例如 90分钟、2小时30分钟或 2天。", onDismiss) {
         OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("任务标题") }, singleLine = true, shape = RoundedCornerShape(14.dp))
-        Spacer(Modifier.height(10.dp))
-        OutlinedTextField(due, { due = it }, Modifier.fillMaxWidth(), label = { Text("日期（YYYY-MM-DD）") }, singleLine = true, shape = RoundedCornerShape(14.dp))
-        Spacer(Modifier.height(10.dp))
-        OutlinedTextField(startTime, { startTime = it.take(5) }, Modifier.fillMaxWidth(), label = { Text("开始时间（HH:mm）") }, singleLine = true, shape = RoundedCornerShape(14.dp))
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(14.dp))
+        DateWheelPicker(due) { due = it }
+        Spacer(Modifier.height(14.dp))
+        TimeWheelPicker("开始时间", startTime) { startTime = it }
+        Spacer(Modifier.height(14.dp))
         OutlinedTextField(
-            estimate,
-            { estimate = it.filter(Char::isDigit).take(4) },
+            durationInput,
+            { durationInput = it },
             Modifier.fillMaxWidth(),
-            label = { Text("持续时间（分钟，1—1440）") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            label = { Text("持续时间") },
+            supportingText = { Text(if (duration == null) "请输入有效时长，如 1天2小时" else "将按 ${durationText(duration)} 计算，可自动延续至后续日期") },
             singleLine = true,
             shape = RoundedCornerShape(14.dp),
         )
@@ -152,76 +160,87 @@ fun TaskEditorDialog(task: TaskItem?, onDismiss: () -> Unit, onSave: (TaskItem) 
         Spacer(Modifier.height(18.dp))
         PrimaryButton(
             if (task == null) "创建任务" else "保存修改",
-            onClick = { onSave((task ?: TaskItem(title = title.trim())).copy(
-                title = title.trim(),
-                dueDate = due.takeIf { it.isNotBlank() },
-                scheduledTime = startTime.takeIf { it.isNotBlank() },
-                estimateMinutes = (estimate.toIntOrNull() ?: 30).coerceIn(1, 1440),
-                content = content.trim(),
-                tags = tags.split(',', '，').map(String::trim).filter(String::isNotBlank).distinct(),
-                priority = priority,
-            )) },
+            onClick = {
+                val date = due.toLocalDateOrNull()
+                if (date == null) {
+                    invalidDate = true
+                } else {
+                    val value = result(date)
+                    if (engine.taskPhase(value, LocalDateTime.now()) == TaskPhase.OVERDUE) overdueTask = value
+                    else onSave(value)
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
             enabled = formValid,
+        )
+    }
+    if (invalidDate) InvalidDateDialog { invalidDate = false }
+    overdueTask?.let { value ->
+        AlertDialog(
+            onDismissRequest = { overdueTask = null },
+            title = { Text("任务已逾期") },
+            text = { Text("所选任务已经超过预计结束时间，保存后会立即显示为逾期。") },
+            confirmButton = { TextButton(onClick = { overdueTask = null; onSave(value) }) { Text("仍然保存") } },
+            dismissButton = { TextButton(onClick = { overdueTask = null }) { Text("返回修改") } },
         )
     }
 }
 
 @Composable
-fun NoteEditorDialog(goals: List<GoalItem>, onDismiss: () -> Unit, onSave: (NoteItem) -> Unit) {
-    var title by remember { mutableStateOf("") }
-    var content by remember { mutableStateOf("") }
-    var tags by remember { mutableStateOf("") }
-    var goalId by remember { mutableStateOf<String?>(null) }
-    DialogShell("写笔记", "内容自动保存在本机知识库。", onDismiss) {
+fun DiaryEditorDialog(
+    diary: DiaryEntry?,
+    date: LocalDate,
+    template: String,
+    onDismiss: () -> Unit,
+    onSave: (DiaryEntry) -> Unit,
+) {
+    var title by remember(diary?.id, date) { mutableStateOf(diary?.title.orEmpty()) }
+    var content by remember(diary?.id, date) { mutableStateOf(diary?.content ?: template) }
+    DialogShell(if (diary == null) "写日记" else "编辑日记", "记录时间会自动读取本机时间，标题可自由编辑。", onDismiss) {
         OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("标题") }, singleLine = true, shape = RoundedCornerShape(14.dp))
         Spacer(Modifier.height(10.dp))
         OutlinedTextField(content, { content = it }, Modifier.fillMaxWidth().heightIn(min = 150.dp), label = { Text("正文") }, shape = RoundedCornerShape(14.dp))
-        Spacer(Modifier.height(10.dp))
-        OutlinedTextField(tags, { tags = it }, Modifier.fillMaxWidth(), label = { Text("标签（用逗号分隔）") }, singleLine = true, shape = RoundedCornerShape(14.dp))
-        if (goals.isNotEmpty()) {
-            Spacer(Modifier.height(14.dp))
-            Text("关联目标（可选）", style = MaterialTheme.typography.labelLarge)
-            Spacer(Modifier.height(7.dp))
-            goals.forEach { goal ->
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { goalId = if (goalId == goal.id) null else goal.id }.padding(vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = goalId == goal.id, onClick = { goalId = if (goalId == goal.id) null else goal.id })
-                    Text(goal.title, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
         Spacer(Modifier.height(18.dp))
         PrimaryButton(
-            "保存笔记",
+            "保存日记",
             onClick = {
-                onSave(NoteItem(
-                    title = title.trim().ifBlank { content.trim().take(24) },
+                val now = LocalDateTime.now().toString()
+                onSave((diary ?: DiaryEntry(date = date.toString(), title = title.trim(), content = content.trim(), createdAt = now)).copy(
+                    date = date.toString(),
+                    title = title.trim(),
                     content = content.trim(),
-                    tags = tags.split(',', '，').map(String::trim).filter(String::isNotBlank),
-                    goalId = goalId,
+                    updatedAt = now,
                 ))
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = title.isNotBlank() || content.isNotBlank(),
+            enabled = title.isNotBlank(),
         )
+    }
+}
+
+@Composable
+fun DiaryTemplateDialog(initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var template by remember(initial) { mutableStateOf(initial) }
+    DialogShell("日记文本模板", "新建日记时会自动带入，可继续编辑；清空后将新建空白正文。", onDismiss) {
+        OutlinedTextField(template, { template = it }, Modifier.fillMaxWidth().heightIn(min = 180.dp), label = { Text("模板正文") }, shape = RoundedCornerShape(14.dp))
+        Spacer(Modifier.height(18.dp))
+        PrimaryButton("保存模板", onClick = { onSave(template) }, modifier = Modifier.fillMaxWidth())
     }
 }
 
 @Composable
 fun GoalEditorDialog(goal: GoalItem?, onDismiss: () -> Unit, onSave: (GoalItem) -> Unit) {
     var title by remember(goal?.id) { mutableStateOf(goal?.title.orEmpty()) }
-    var deadline by remember(goal?.id) { mutableStateOf(goal?.deadline ?: LocalDate.now().plusMonths(3).toString()) }
+    var deadline by remember(goal?.id) { mutableStateOf(DateWheelValue.from(goal?.deadline, LocalDate.now().plusMonths(3))) }
     var content by remember(goal?.id) { mutableStateOf(goal?.content.orEmpty()) }
     val subtasks = remember(goal?.id) { mutableStateListOf<String>().apply { addAll(goal?.subtasks?.map { it.title } ?: listOf("")) } }
-    val goalValid = title.isNotBlank() && runCatching { LocalDate.parse(deadline) }.isSuccess
+    var invalidDate by remember { mutableStateOf(false) }
+    val goalValid = title.isNotBlank()
     DialogShell(if (goal == null) "创建长期目标" else "编辑长期目标", "目标独立于日程与待办；子任务可随时增删。", onDismiss) {
         OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("目标标题") }, singleLine = true, shape = RoundedCornerShape(14.dp))
-        Spacer(Modifier.height(10.dp))
-        OutlinedTextField(deadline, { deadline = it }, Modifier.fillMaxWidth(), label = { Text("截止时间（YYYY-MM-DD）") }, singleLine = true, shape = RoundedCornerShape(14.dp))
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(14.dp))
+        DateWheelPicker(deadline) { deadline = it }
+        Spacer(Modifier.height(14.dp))
         OutlinedTextField(content, { content = it }, Modifier.fillMaxWidth().heightIn(min = 110.dp), label = { Text("具体内容") }, shape = RoundedCornerShape(14.dp))
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -247,10 +266,15 @@ fun GoalEditorDialog(goal: GoalItem?, onDismiss: () -> Unit, onSave: (GoalItem) 
         PrimaryButton(
             if (goal == null) "创建目标" else "保存修改",
             onClick = {
+                val validDeadline = deadline.toLocalDateOrNull()
+                if (validDeadline == null) {
+                    invalidDate = true
+                    return@PrimaryButton
+                }
                 val oldByTitle = goal?.subtasks?.associateBy { it.title }.orEmpty()
-                onSave((goal ?: GoalItem(title = title.trim(), deadline = deadline)).copy(
+                onSave((goal ?: GoalItem(title = title.trim(), deadline = validDeadline.toString())).copy(
                     title = title.trim(),
-                    deadline = deadline,
+                    deadline = validDeadline.toString(),
                     content = content.trim(),
                     subtasks = subtasks.map(String::trim).filter(String::isNotBlank).map { text -> oldByTitle[text] ?: GoalSubtask(title = text) },
                 ))
@@ -259,6 +283,7 @@ fun GoalEditorDialog(goal: GoalItem?, onDismiss: () -> Unit, onSave: (GoalItem) 
             enabled = goalValid,
         )
     }
+    if (invalidDate) InvalidDateDialog { invalidDate = false }
 }
 
 @Composable
@@ -282,7 +307,7 @@ fun OverdueReminderDialog(
                         Checkbox(checked = false, onCheckedChange = { onComplete(task.id) })
                         Column(Modifier.weight(1f)) {
                             Text(task.title, style = MaterialTheme.typography.titleMedium)
-                            Text("${task.dueDate} ${task.scheduledTime ?: ""} · ${durationText(task.estimateMinutes)}", style = MaterialTheme.typography.labelMedium, color = Coral)
+                            Text("${task.dueDate} ${task.scheduledTime ?: ""} · ${task.durationInput.ifBlank { durationText(task.estimateMinutes) }}", style = MaterialTheme.typography.labelMedium, color = Coral)
                         }
                     }
                 }

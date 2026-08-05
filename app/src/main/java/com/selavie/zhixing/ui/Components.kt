@@ -126,7 +126,7 @@ fun TaskRow(
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
                 task.dueDate?.let { Text(friendlyDate(it), style = MaterialTheme.typography.labelMedium, color = if (phase == TaskPhase.OVERDUE) Coral else Muted) }
                 task.scheduledTime?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = Blue) }
-                Text(durationText(task.estimateMinutes), style = MaterialTheme.typography.labelMedium, color = Muted)
+                Text(task.durationInput.ifBlank { durationText(task.estimateMinutes) }, style = MaterialTheme.typography.labelMedium, color = Muted)
             }
         }
         TaskPhaseTag(phase)
@@ -197,12 +197,13 @@ fun friendlyDate(value: String): String = runCatching {
 }.getOrDefault(value.take(10))
 
 fun durationText(minutes: Int): String {
-    val safe = minutes.coerceIn(1, 1440)
-    val hours = safe / 60
+    val safe = minutes.coerceAtLeast(1)
+    val days = safe / 1440
+    val hours = safe % 1440 / 60
     val rest = safe % 60
-    return when {
-        hours == 0 -> "$rest 分钟"
-        rest == 0 -> "$hours 小时"
-        else -> "$hours 小时 $rest 分钟"
-    }
+    return buildList {
+        if (days > 0) add("$days 天")
+        if (hours > 0) add("$hours 小时")
+        if (rest > 0 || isEmpty()) add("$rest 分钟")
+    }.joinToString(" ")
 }

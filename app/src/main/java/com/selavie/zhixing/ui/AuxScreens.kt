@@ -5,6 +5,8 @@ package com.selavie.zhixing.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -34,7 +36,9 @@ fun CalendarScreen(controller: AppController, now: java.time.LocalDateTime, onBa
     var openedReview by remember { mutableStateOf<ReviewEntry?>(null) }
     val monday = selected.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
     val events = controller.data.events.filter { it.date == selected.toString() }.sortedBy { it.startTime }
-    val tasks = controller.data.tasks.filter { it.dueDate == selected.toString() }.sortedBy { it.scheduledTime ?: "99:99" }
+    val tasks = controller.data.tasks.filter { controller.smartEngine.taskSegmentOn(it, selected) != null }.sortedBy {
+        controller.smartEngine.taskSegmentOn(it, selected)?.startMinute ?: Int.MAX_VALUE
+    }
     val review = controller.data.reviews.firstOrNull { it.date == selected.toString() }
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("TIME", "日历", "查看日程、待办与每日复盘", onBack = onBack, action = {
@@ -111,32 +115,35 @@ fun CalendarScreen(controller: AppController, now: java.time.LocalDateTime, onBa
 @Composable
 private fun EventEditorDialog(date: LocalDate, onDismiss: () -> Unit, onSave: (CalendarEvent) -> Unit) {
     var title by remember { mutableStateOf("") }
-    var selectedDate by remember { mutableStateOf(date.toString()) }
-    var start by remember { mutableStateOf("09:00") }
-    var end by remember { mutableStateOf("10:00") }
+    var selectedDate by remember { mutableStateOf(DateWheelValue.from(date.toString())) }
+    var start by remember { mutableStateOf(TimeWheelValue(9, 0)) }
+    var end by remember { mutableStateOf(TimeWheelValue(10, 0)) }
     var content by remember { mutableStateOf("") }
     var tags by remember { mutableStateOf("") }
+    var invalidDate by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("添加日程") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(title, { title = it }, label = { Text("标题") }, singleLine = true)
-                OutlinedTextField(selectedDate, { selectedDate = it }, label = { Text("日期") }, singleLine = true)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(start, { start = it.take(5) }, label = { Text("开始") }, singleLine = true, modifier = Modifier.weight(1f))
-                    OutlinedTextField(end, { end = it.take(5) }, label = { Text("结束") }, singleLine = true, modifier = Modifier.weight(1f))
-                }
+                DateWheelPicker(selectedDate) { selectedDate = it }
+                TimeWheelPicker("开始时间", start) { start = it }
+                TimeWheelPicker("结束时间", end) { end = it }
                 OutlinedTextField(content, { content = it }, label = { Text("具体内容") })
                 OutlinedTextField(tags, { tags = it }, label = { Text("标签") }, singleLine = true)
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(CalendarEvent(
-            title = title.trim(), date = selectedDate, startTime = start, endTime = end, content = content.trim(),
-            tags = tags.split(',', '，').map(String::trim).filter(String::isNotBlank),
-        )) }, enabled = title.isNotBlank()) { Text("确认创建") } },
+        confirmButton = { TextButton(onClick = {
+            val validDate = selectedDate.toLocalDateOrNull()
+            if (validDate == null) invalidDate = true else onSave(CalendarEvent(
+                title = title.trim(), date = validDate.toString(), startTime = start.asText(), endTime = end.asText(), content = content.trim(),
+                tags = tags.split(',', '，').map(String::trim).filter(String::isNotBlank),
+            ))
+        }, enabled = title.isNotBlank()) { Text("确认创建") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
+    if (invalidDate) InvalidDateDialog { invalidDate = false }
 }
 
 @Composable
@@ -149,12 +156,13 @@ fun ProfileScreen(
     val current = controller.data.preferences
     var name by remember(current.name) { mutableStateOf(current.name) }
     var gender by remember(current.genderSymbol) { mutableStateOf(current.genderSymbol) }
-    var birthday by remember(current.birthday) { mutableStateOf(current.birthday) }
+    var hasBirthday by remember(current.birthday) { mutableStateOf(current.birthday.isNotBlank()) }
+    var birthday by remember(current.birthday) { mutableStateOf(DateWheelValue.from(current.birthday)) }
     var motto by remember(current.motto) { mutableStateOf(current.motto) }
     var saved by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var undoMessage by remember { mutableStateOf<String?>(null) }
-    val birthdayValid = birthday.isBlank() || runCatching { LocalDate.parse(birthday) }.isSuccess
+    var invalidDate by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("ME", "个人信息", "资料、隐私与本地数据", onBack = onBack)
@@ -178,34 +186,41 @@ fun ProfileScreen(
                             FilterChip(selected = gender == symbol, onClick = { gender = symbol; saved = false }, label = { Text(if (symbol.isBlank()) label else "$symbol $label") })
                         }
                     }
-                    Spacer(Modifier.height(10.dp))
-                    OutlinedTextField(
-                        birthday,
-                        { birthday = it; saved = false },
-                        Modifier.fillMaxWidth(),
-                        label = { Text("生日（YYYY-MM-DD）") },
-                        singleLine = true,
-                        isError = !birthdayValid,
-                        supportingText = if (!birthdayValid) ({ Text("请输入有效日期，例如 1998-08-05") }) else null,
-                        shape = RoundedCornerShape(14.dp),
-                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("设置生日", style = MaterialTheme.typography.labelLarge)
+                            Text("年份固定以 2 开头", style = MaterialTheme.typography.labelMedium, color = Muted)
+                        }
+                        Switch(checked = hasBirthday, onCheckedChange = { hasBirthday = it; saved = false })
+                    }
+                    if (hasBirthday) {
+                        Spacer(Modifier.height(8.dp))
+                        DateWheelPicker(birthday) { birthday = it; saved = false }
+                    }
                     Text("按本地时间在生日当天上午 8:00 推送祝福；首次保存会请求通知权限。", style = MaterialTheme.typography.labelMedium, color = Muted, modifier = Modifier.padding(top = 6.dp))
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(motto, { motto = it; saved = false }, Modifier.fillMaxWidth().heightIn(min = 96.dp), label = { Text("座右铭") }, shape = RoundedCornerShape(14.dp))
                     Spacer(Modifier.height(14.dp))
                     PrimaryButton(if (saved) "已保存" else "保存个人信息", onClick = {
-                        controller.updatePreferences(current.copy(name = name.trim().ifBlank { "我" }, genderSymbol = gender, birthday = birthday.trim(), motto = motto.trim()))
-                        onBirthdayChanged(birthday.trim())
-                        saved = true
-                    }, modifier = Modifier.fillMaxWidth(), enabled = !saved && birthdayValid)
+                        val validBirthday = if (hasBirthday) birthday.toLocalDateOrNull() else null
+                        if (hasBirthday && validBirthday == null) {
+                            invalidDate = true
+                        } else {
+                            val birthdayText = validBirthday?.toString().orEmpty()
+                            controller.updatePreferences(controller.data.preferences.copy(name = name.trim().ifBlank { "我" }, genderSymbol = gender, birthday = birthdayText, motto = motto.trim()))
+                            onBirthdayChanged(birthdayText)
+                            saved = true
+                        }
+                    }, modifier = Modifier.fillMaxWidth(), enabled = !saved)
                 }
             }
             item {
                 SectionTitle("AI 数据权限")
                 Spacer(Modifier.height(8.dp))
                 ZCard {
-                    SettingsToggle("笔记参与检索", "关闭后，助手不会读取笔记", controller.data.preferences.includeNotesInAi) {
-                        controller.updatePreferences(controller.data.preferences.copy(includeNotesInAi = it))
+                    SettingsToggle("日记参与检索", "关闭后，助手不会读取日记", controller.data.preferences.includeDiariesInAi) {
+                        controller.updatePreferences(controller.data.preferences.copy(includeDiariesInAi = it))
                     }
                     Divider(color = Line)
                     SettingsToggle("任务参与检索", "用于回答完成情况与安排", controller.data.preferences.includeTasksInAi) {
@@ -251,10 +266,11 @@ fun ProfileScreen(
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },
         title = { Text("清空所有本机数据？") },
-        text = { Text("个人信息、任务、笔记、目标、日程、复盘和执行记录都会被永久删除。") },
+        text = { Text("个人信息、任务、日记、目标、日程、复盘和执行记录都会被永久删除。") },
         confirmButton = { TextButton(onClick = { confirmDelete = false; onBirthdayChanged(""); controller.deleteAllData() }) { Text("确认清空", color = Coral) } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("取消") } },
     )
+    if (invalidDate) InvalidDateDialog { invalidDate = false }
 }
 
 @Composable

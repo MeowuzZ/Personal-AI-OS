@@ -54,7 +54,7 @@ fun OnboardingScreen(onEmpty: () -> Unit, onDemo: () -> Unit) {
             Spacer(Modifier.height(18.dp))
             Text("把想法变成\n今天的行动。", style = MaterialTheme.typography.displaySmall)
             Spacer(Modifier.height(18.dp))
-            Text("在一个地方记录任务、笔记与长期目标。知行会帮你整理和复盘，但任何写入都先由你确认。", style = MaterialTheme.typography.bodyLarge, color = Muted)
+            Text("在一个地方记录任务、日记与长期目标。知行会帮你整理和复盘，但任何写入都先由你确认。", style = MaterialTheme.typography.bodyLarge, color = Muted)
             Spacer(Modifier.height(34.dp))
             listOf(
                 "01" to "用时间轴看见每天的空闲与安排",
@@ -87,7 +87,9 @@ fun TodayScreen(
 ) {
     val data = controller.data
     val today = LocalDate.now()
-    val tasks = data.tasks.filter { it.dueDate == today.toString() }.sortedBy { it.scheduledTime ?: "99:99" }
+    val tasks = data.tasks.filter { controller.smartEngine.taskSegmentOn(it, today) != null }.sortedBy { task ->
+        controller.smartEngine.taskSegmentOn(task, today)?.startMinute ?: Int.MAX_VALUE
+    }
     val events = data.events.filter { it.date == today.toString() }.sortedBy { it.startTime }
     val reviewDate = when {
         now.hour >= 23 -> today
@@ -256,7 +258,7 @@ private fun ExpandableTaskCard(
             Divider(color = Line)
             Spacer(Modifier.height(12.dp))
             DetailLine("日期与时间", "${task.dueDate ?: "未设置"}  ${task.scheduledTime ?: "未设置"}")
-            DetailLine("持续时间", durationText(task.estimateMinutes))
+            DetailLine("持续时间", task.durationInput.ifBlank { durationText(task.estimateMinutes) })
             DetailLine("具体内容", task.content.ifBlank { "未填写" })
             DetailLine("标签", task.tags.ifEmpty { listOf("未添加") }.joinToString(" · "))
             Spacer(Modifier.height(14.dp))
@@ -293,7 +295,7 @@ private fun TaskDateView(controller: AppController) {
             Spacer(Modifier.height(12.dp))
         }
         items((0L..13L).map(start::plusDays)) { date ->
-            val tasks = controller.data.tasks.filter { it.dueDate == date.toString() && it.scheduledTime != null }
+            val tasks = controller.data.tasks.mapNotNull { task -> controller.smartEngine.taskSegmentOn(task, date)?.let { task to it } }
             val events = controller.data.events.filter { it.date == date.toString() }
             ZCard(modifier = Modifier.padding(bottom = 10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -306,7 +308,8 @@ private fun TaskDateView(controller: AppController) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     listOf("0", "6", "12", "18", "24").forEach { Text(it, style = MaterialTheme.typography.labelMedium, color = Muted) }
                 }
-                (tasks.map { "${it.scheduledTime} ${it.title}" } + events.map { "${it.startTime} ${it.title}" }).sorted().take(4).forEach {
+                (tasks.map { (task, segment) -> "%02d:%02d %s".format(segment.startMinute / 60, segment.startMinute % 60, task.title) } +
+                    events.map { "${it.startTime} ${it.title}" }).sorted().take(4).forEach {
                     Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 7.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -316,7 +319,7 @@ private fun TaskDateView(controller: AppController) {
 }
 
 @Composable
-private fun DayTimeline(tasks: List<TaskItem>, events: List<CalendarEvent>) {
+private fun DayTimeline(tasks: List<Pair<TaskItem, TaskTimeSegment>>, events: List<CalendarEvent>) {
     Canvas(Modifier.fillMaxWidth().height(28.dp).clip(RoundedCornerShape(8.dp)).background(PaperDeep)) {
         fun drawSegment(startMinutes: Int, duration: Int, color: Color) {
             val left = size.width * (startMinutes.coerceIn(0, 1440) / 1440f)
@@ -328,9 +331,9 @@ private fun DayTimeline(tasks: List<TaskItem>, events: List<CalendarEvent>) {
             val end = timeMinutes(event.endTime)
             drawSegment(start, (end - start).coerceAtLeast(1), Ink.copy(alpha = .72f))
         }
-        tasks.forEach { task ->
+        tasks.forEach { (task, segment) ->
             val color = when (task.status) { TaskStatus.DONE -> Muted; TaskStatus.TODO -> Ink }
-            drawSegment(timeMinutes(task.scheduledTime ?: "00:00"), task.estimateMinutes, color)
+            drawSegment(segment.startMinute, segment.durationMinutes, color)
         }
     }
 }
@@ -385,42 +388,156 @@ private fun TaskTagView(
 }
 
 @Composable
-fun KnowledgeScreen(controller: AppController) {
-    var query by rememberSaveable { mutableStateOf("") }
-    var editorOpen by remember { mutableStateOf(false) }
-    val notes = controller.data.notes.filter {
-        query.isBlank() || it.title.contains(query, true) || it.content.contains(query, true) || it.tags.any { tag -> tag.contains(query, true) }
-    }.sortedByDescending { it.updatedAt }
+fun DiaryScreen(controller: AppController) {
+    var visibleMonth by remember { mutableStateOf(YearMonth.now()) }
+    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
+    var createOpen by remember { mutableStateOf(false) }
+    var editorDiary by remember { mutableStateOf<DiaryEntry?>(null) }
+    var templateOpen by remember { mutableStateOf(false) }
+    var deleteDiary by remember { mutableStateOf<DiaryEntry?>(null) }
+    val diaryDates = controller.data.diaries.mapNotNull { runCatching { LocalDate.parse(it.date) }.getOrNull() }.toSet()
+    val selectedDiaries = controller.data.diaries.filter { it.date == selectedDate.toString() }.sortedByDescending { it.createdAt }
+
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader("KNOWLEDGE", "知识库", "搜索标题、正文与标签", action = { TextButton(onClick = { editorOpen = true }) { Text("写笔记") } })
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-            placeholder = { Text("搜索我的知识…") },
-            singleLine = true,
-            shape = RoundedCornerShape(16.dp),
-        )
-        LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (notes.isEmpty()) item { EmptyState("知", if (query.isBlank()) "从第一条笔记开始" else "没有匹配结果", "记录想法、资料和可复用的经验。") }
-            items(notes, key = { it.id }) { note ->
+        ScreenHeader("DIARY", "日记", "月历与本地记录", action = {
+            Row {
+                TextButton(onClick = { templateOpen = true }) { Text("模板") }
+                TextButton(onClick = { createOpen = true }) { Text("新建") }
+            }
+        })
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 110.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
                 ZCard {
-                    Text(note.title, style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(7.dp))
-                    Text(note.content, style = MaterialTheme.typography.bodyMedium, color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                    if (note.tags.isNotEmpty()) {
-                        Spacer(Modifier.height(12.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { items(note.tags) { Tag("#$it") } }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = {
+                            visibleMonth = visibleMonth.minusMonths(1)
+                            selectedDate = visibleMonth.atDay(1)
+                        }) { Text("←") }
+                        Text(
+                            visibleMonth.format(DateTimeFormatter.ofPattern("yyyy年M月", Locale.CHINA)),
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.weight(1f),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                        TextButton(onClick = {
+                            visibleMonth = visibleMonth.plusMonths(1)
+                            selectedDate = visibleMonth.atDay(1)
+                        }) { Text("→") }
                     }
-                    Spacer(Modifier.height(10.dp))
-                    Text("更新于 ${friendlyDate(note.updatedAt)}", style = MaterialTheme.typography.labelMedium, color = Muted)
+                    DiaryMonthCalendar(visibleMonth, selectedDate, diaryDates) { selectedDate = it }
                 }
             }
-            item { Spacer(Modifier.height(90.dp)) }
+            item {
+                SectionTitle(
+                    selectedDate.format(DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.CHINA)),
+                    "${selectedDiaries.size} 篇",
+                )
+            }
+            if (selectedDiaries.isEmpty()) {
+                item { EmptyState("记", "这一天还没有日记", "点击右上角“新建”，从模板或空白正文开始记录。") }
+            }
+            items(selectedDiaries, key = { it.id }) { diary ->
+                ZCard {
+                    Text(diary.title, style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(5.dp))
+                    Text("记录于 ${localDiaryTime(diary.createdAt)}", style = MaterialTheme.typography.labelMedium, color = Success)
+                    Spacer(Modifier.height(12.dp))
+                    Text(diary.content.ifBlank { "（空白正文）" }, style = MaterialTheme.typography.bodyMedium, color = if (diary.content.isBlank()) Muted else Ink)
+                    Spacer(Modifier.height(16.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        SecondaryButton("编辑", onClick = { editorDiary = diary }, modifier = Modifier.weight(1f))
+                        OutlinedButton(
+                            onClick = { deleteDiary = diary },
+                            modifier = Modifier.weight(1f).height(52.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Coral),
+                        ) { Text("删除", color = Coral) }
+                    }
+                }
+            }
         }
     }
-    if (editorOpen) NoteEditorDialog(controller.data.goals, onDismiss = { editorOpen = false }) { controller.addNote(it); editorOpen = false }
+    if (createOpen) DiaryEditorDialog(
+        diary = null,
+        date = selectedDate,
+        template = controller.data.preferences.diaryTemplate,
+        onDismiss = { createOpen = false },
+    ) { controller.addDiary(it); createOpen = false }
+    editorDiary?.let { diary -> DiaryEditorDialog(
+        diary = diary,
+        date = runCatching { LocalDate.parse(diary.date) }.getOrDefault(selectedDate),
+        template = controller.data.preferences.diaryTemplate,
+        onDismiss = { editorDiary = null },
+    ) { controller.updateDiary(it); editorDiary = null } }
+    if (templateOpen) DiaryTemplateDialog(
+        initial = controller.data.preferences.diaryTemplate,
+        onDismiss = { templateOpen = false },
+    ) { template ->
+        controller.updatePreferences(controller.data.preferences.copy(diaryTemplate = template))
+        templateOpen = false
+    }
+    deleteDiary?.let { diary ->
+        AlertDialog(
+            onDismissRequest = { deleteDiary = null },
+            title = { Text("删除日记？") },
+            text = { Text("“${diary.title}”会被永久删除，此操作无法撤销。") },
+            confirmButton = { TextButton(onClick = { controller.deleteDiary(diary.id); deleteDiary = null }) { Text("确认删除", color = Coral) } },
+            dismissButton = { TextButton(onClick = { deleteDiary = null }) { Text("取消") } },
+        )
+    }
 }
+
+@Composable
+private fun DiaryMonthCalendar(month: YearMonth, selectedDate: LocalDate, diaryDates: Set<LocalDate>, onSelect: (LocalDate) -> Unit) {
+    val first = month.atDay(1)
+    val leading = first.dayOfWeek.value - 1
+    val cells = (0 until 42).map { index ->
+        val day = index - leading + 1
+        if (day in 1..month.lengthOfMonth()) month.atDay(day) else null
+    }
+    Spacer(Modifier.height(6.dp))
+    Row(Modifier.fillMaxWidth()) {
+        listOf("一", "二", "三", "四", "五", "六", "日").forEach { label ->
+            Text(label, style = MaterialTheme.typography.labelMedium, color = Muted, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
+    }
+    Spacer(Modifier.height(4.dp))
+    cells.chunked(7).forEach { week ->
+        Row(Modifier.fillMaxWidth()) {
+            week.forEach { date ->
+                Box(Modifier.weight(1f).aspectRatio(1f).padding(2.dp), contentAlignment = Alignment.Center) {
+                    if (date != null) {
+                        val selected = date == selectedDate
+                        val hasDiary = date in diaryDates
+                        Surface(
+                            modifier = Modifier.fillMaxSize().clickable { onSelect(date) },
+                            shape = CircleShape,
+                            color = if (selected) PaperDeep else Color.Transparent,
+                            border = if (selected) androidx.compose.foundation.BorderStroke(1.dp, Ink) else null,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    date.dayOfMonth.toString(),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (hasDiary) Success else Ink,
+                                    fontWeight = if (hasDiary || selected) FontWeight.ExtraBold else FontWeight.Normal,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun localDiaryTime(raw: String): String = runCatching {
+    LocalDateTime.parse(raw).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.CHINA))
+}.getOrDefault(raw.replace('T', ' ').take(16))
 
 @Composable
 fun GoalsScreen(controller: AppController) {
@@ -473,7 +590,12 @@ fun GoalsScreen(controller: AppController) {
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         SecondaryButton("编辑", onClick = { editorGoal = goal }, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { deleteGoal = goal }, modifier = Modifier.weight(1f).height(52.dp)) { Text("删除", color = Coral) }
+                        OutlinedButton(
+                            onClick = { deleteGoal = goal },
+                            modifier = Modifier.weight(1f).height(52.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Coral),
+                        ) { Text("删除", color = Coral) }
                     }
                 }
             }
