@@ -1,7 +1,34 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+fun secretFromEnvironment(valueName: String, fileName: String): String? {
+    val directValue = System.getenv(valueName)?.trim()
+    if (!directValue.isNullOrEmpty()) return directValue
+
+    val secretFile = System.getenv(fileName)?.trim()
+    return secretFile
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { File(it).readText().trim() }
+        ?.takeIf { it.isNotEmpty() }
+}
+
+val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")?.trim()
+val releaseStorePassword = secretFromEnvironment(
+    valueName = "ANDROID_KEYSTORE_PASSWORD",
+    fileName = "ANDROID_KEYSTORE_PASSWORD_FILE",
+)
+val releaseKeyPassword = secretFromEnvironment(
+    valueName = "ANDROID_KEY_PASSWORD",
+    fileName = "ANDROID_KEY_PASSWORD_FILE",
+) ?: releaseStorePassword
+val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")?.trim().orEmpty().ifEmpty { "personal-ai-os" }
+val releaseSigningConfigured = !releaseKeystorePath.isNullOrEmpty() &&
+    !releaseStorePassword.isNullOrEmpty() &&
+    !releaseKeyPassword.isNullOrEmpty()
 
 android {
     namespace = "com.selavie.zhixing"
@@ -18,9 +45,23 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseKeystorePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

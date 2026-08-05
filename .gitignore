@@ -11,6 +11,7 @@ local.properties
 .DS_Store
 
 # Signing credentials and generated packages
+/.signing-backup/
 *.jks
 *.keystore
 *.apk
