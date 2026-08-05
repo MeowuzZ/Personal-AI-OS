@@ -4,6 +4,16 @@
 
 当前版本：**v0.2.0**
 
+## 下载与安装
+
+前往 [GitHub Releases](https://github.com/MeowuzZ/Personal-AI-OS/releases/latest)，在 **Assets** 中下载与版本号对应的 APK，例如：
+
+```text
+Personal-AI-OS-v0.2.0.apk
+```
+
+下载后在安卓手机上打开 APK；首次安装时需要允许浏览器或文件管理器“安装未知应用”。Release 同时提供 `.sha256` 文件用于校验下载完整性。
+
 ## 更新日志
 
 ### v0.2.0 · 2026-08-05
@@ -19,6 +29,7 @@
 - 重构长期目标系统，支持主任务与子任务独立进度、自动完成和取消主任务后的子任务进度恢复。
 - 新增 AI 每日复盘、超过 8 小时的休息鼓励、23:00—次日 6:00 首页入口和日历历史回看。
 - 增加旧版数据迁移、11 项单元测试及 Android 36 模拟器验收。
+- 新增固定签名的 GitHub Actions 自动构建流程，版本发布后可从 GitHub Releases 直接下载 APK 和 SHA-256 校验文件。
 
 ### v0.1.0 · 2026-08-05
 
@@ -81,6 +92,8 @@ export ANDROID_HOME="$HOME/Library/Android/sdk"
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
+
+仓库维护者可在 GitHub 的 **Actions → Build and publish Android APK → Run workflow** 中输入版本号，自动完成测试、签名、构建和 Release 上传。正式签名通过 GitHub Secrets 注入，不存放在仓库中。
 
 安装到已连接的安卓手机（需开启 USB 调试）：
 
