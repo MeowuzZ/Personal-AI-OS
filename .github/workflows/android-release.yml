@@ -67,14 +67,16 @@ jobs:
       - name: Verify and package APK
         run: |
           APK_SOURCE="app/build/outputs/apk/release/app-release.apk"
-          APK_DESTINATION="dist/Personal-AI-OS-${RELEASE_VERSION}.apk"
+          APK_NAME="Personal-AI-OS-${RELEASE_VERSION}.apk"
+          APK_DESTINATION="dist/$APK_NAME"
           test -f "$APK_SOURCE" || { echo "Signed release APK was not generated" >&2; exit 1; }
           mkdir -p dist
           cp "$APK_SOURCE" "$APK_DESTINATION"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -n "$APKSIGNER" || { echo "apksigner was not found" >&2; exit 1; }
           "$APKSIGNER" verify --verbose "$APK_DESTINATION"
-          sha256sum "$APK_DESTINATION" > "$APK_DESTINATION.sha256"
+          cd dist
+          sha256sum "$APK_NAME" > "$APK_NAME.sha256"
 
       - name: Create or update GitHub Release
         env:
