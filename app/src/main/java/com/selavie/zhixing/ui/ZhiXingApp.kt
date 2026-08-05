@@ -25,7 +25,7 @@ import java.time.LocalDateTime
 import kotlinx.coroutines.delay
 
 enum class AppScreen(val label: String) {
-    TODAY("今日"), TASKS("任务"), KNOWLEDGE("知识"), GOALS("目标"), ASSISTANT("助手"),
+    TODAY("今日"), TASKS("任务"), KNOWLEDGE("日记"), GOALS("目标"), ASSISTANT("助手"),
     CALENDAR("日历"), PROFILE("个人信息"),
 }
 
@@ -89,7 +89,7 @@ fun ZhiXingApp(
                         },
                     )
                     AppScreen.TASKS -> TasksScreen(controller, clock)
-                    AppScreen.KNOWLEDGE -> KnowledgeScreen(controller)
+                    AppScreen.KNOWLEDGE -> DiaryScreen(controller)
                     AppScreen.GOALS -> GoalsScreen(controller)
                     AppScreen.ASSISTANT -> AssistantScreen(
                         controller = controller,

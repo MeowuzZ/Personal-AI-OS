@@ -110,7 +110,7 @@ fun AssistantScreen(
                     value = input,
                     onValueChange = { input = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("询问我的任务、笔记或目标…") },
+                    placeholder = { Text("询问我的任务、日记或目标…") },
                     shape = RoundedCornerShape(18.dp),
                     maxLines = 4,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),

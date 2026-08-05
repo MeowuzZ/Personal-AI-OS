@@ -21,13 +21,13 @@ class AppController(
     fun beginDemo() = commit(repository.demoData())
 
     fun addTask(task: TaskItem, audit: Boolean = true) {
-        val normalized = task.copy(estimateMinutes = task.estimateMinutes.coerceIn(1, 1440))
+        val normalized = task.copy(estimateMinutes = task.estimateMinutes.coerceAtLeast(1))
         val entry = AuditEntry(action = "创建任务", summary = normalized.title, beforeJson = "remove-task:${normalized.id}", undoable = true)
         commit(data.copy(tasks = data.tasks + normalized, audits = if (audit) listOf(entry) + data.audits else data.audits))
     }
 
     fun updateTask(task: TaskItem) {
-        val normalized = task.copy(estimateMinutes = task.estimateMinutes.coerceIn(1, 1440))
+        val normalized = task.copy(estimateMinutes = task.estimateMinutes.coerceAtLeast(1))
         commit(data.copy(
             tasks = data.tasks.map { if (it.id == task.id) normalized else it },
             audits = listOf(AuditEntry(action = "编辑任务", summary = task.title)) + data.audits,
@@ -42,9 +42,24 @@ class AppController(
         ))
     }
 
-    fun addNote(note: NoteItem) {
-        val entry = AuditEntry(action = "创建笔记", summary = note.title, beforeJson = "remove-note:${note.id}", undoable = true)
-        commit(data.copy(notes = listOf(note) + data.notes, audits = listOf(entry) + data.audits))
+    fun addDiary(diary: DiaryEntry) {
+        val entry = AuditEntry(action = "创建日记", summary = diary.title, beforeJson = "remove-diary:${diary.id}", undoable = true)
+        commit(data.copy(diaries = listOf(diary) + data.diaries, audits = listOf(entry) + data.audits))
+    }
+
+    fun updateDiary(diary: DiaryEntry) {
+        commit(data.copy(
+            diaries = data.diaries.map { if (it.id == diary.id) diary else it },
+            audits = listOf(AuditEntry(action = "编辑日记", summary = diary.title)) + data.audits,
+        ))
+    }
+
+    fun deleteDiary(diaryId: String) {
+        val diary = data.diaries.firstOrNull { it.id == diaryId } ?: return
+        commit(data.copy(
+            diaries = data.diaries.filterNot { it.id == diaryId },
+            audits = listOf(AuditEntry(action = "删除日记", summary = diary.title)) + data.audits,
+        ))
     }
 
     fun addGoal(goal: GoalItem) {
@@ -96,7 +111,7 @@ class AppController(
                 scheduledTime = LocalTime.now().withSecond(0).withNano(0).toString().take(5),
                 content = draft.rawContent,
             ))
-            ItemType.NOTE -> addNote(NoteItem(title = draft.title.take(24), content = draft.rawContent))
+            ItemType.NOTE -> addDiary(DiaryEntry(title = draft.title.take(24), content = draft.rawContent))
             ItemType.EVENT -> addEvent(CalendarEvent(
                 title = draft.title,
                 date = draft.dueDate ?: LocalDate.now().toString(),
@@ -142,7 +157,7 @@ class AppController(
         var next = data.copy(audits = data.audits.filterNot { it.id == latest.id })
         next = when (pieces.firstOrNull()) {
             "remove-task" -> next.copy(tasks = next.tasks.filterNot { it.id == pieces.getOrNull(1) })
-            "remove-note" -> next.copy(notes = next.notes.filterNot { it.id == pieces.getOrNull(1) })
+            "remove-note", "remove-diary" -> next.copy(diaries = next.diaries.filterNot { it.id == pieces.getOrNull(1) })
             "remove-goal" -> next.copy(goals = next.goals.filterNot { it.id == pieces.getOrNull(1) })
             "remove-event" -> next.copy(events = next.events.filterNot { it.id == pieces.getOrNull(1) })
             "task-status" -> next.copy(tasks = next.tasks.map { task ->
