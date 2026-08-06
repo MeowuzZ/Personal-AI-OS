@@ -3,6 +3,9 @@
 package com.selavie.zhixing.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -31,6 +34,7 @@ import com.selavie.zhixing.ui.theme.*
 import java.time.*
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun OnboardingScreen(onEmpty: () -> Unit, onDemo: () -> Unit) {
@@ -74,98 +78,6 @@ fun OnboardingScreen(onEmpty: () -> Unit, onDemo: () -> Unit) {
             SecondaryButton("先用演示数据体验", onClick = onDemo, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(10.dp))
             Text("所有内容仅保存在这台设备中，可随时导出或清空。", style = MaterialTheme.typography.labelMedium, color = Muted, modifier = Modifier.align(Alignment.CenterHorizontally))
-        }
-    }
-}
-
-@Composable
-fun TodayScreen(
-    controller: AppController,
-    navigate: (AppScreen) -> Unit,
-    now: LocalDateTime,
-    onDailyReview: (LocalDate) -> Unit,
-) {
-    val data = controller.data
-    val today = LocalDate.now()
-    val tasks = data.tasks.filter { controller.smartEngine.taskSegmentOn(it, today) != null }.sortedBy { task ->
-        controller.smartEngine.taskSegmentOn(task, today)?.startMinute ?: Int.MAX_VALUE
-    }
-    val events = data.events.filter { it.date == today.toString() }.sortedBy { it.startTime }
-    val reviewDate = when {
-        now.hour >= 23 -> today
-        now.hour < 6 -> today.minusDays(1)
-        else -> null
-    }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 110.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
-            Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(today.format(DateTimeFormatter.ofPattern("M月d日 · EEEE", Locale.CHINA)), style = MaterialTheme.typography.labelMedium, color = Muted)
-                    Text("早安，${data.preferences.name}${data.preferences.genderSymbol}", style = MaterialTheme.typography.headlineLarge)
-                }
-                TextButton(onClick = { navigate(AppScreen.CALENDAR) }) { Text("日历") }
-                Box(
-                    Modifier.size(46.dp).clip(CircleShape).background(Ink).clickable { navigate(AppScreen.PROFILE) },
-                    contentAlignment = Alignment.Center,
-                ) { Text(data.preferences.name.take(1), color = Lime, fontWeight = FontWeight.Black) }
-            }
-        }
-        reviewDate?.let { date ->
-            item {
-                ZCard(color = Lime.copy(alpha = .62f), onClick = { onDailyReview(date) }) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("每日复盘已开放", style = MaterialTheme.typography.titleMedium)
-                            Text(if (date == today) "整理今天完成的待办" else "补写昨天的完成记录", style = MaterialTheme.typography.bodyMedium, color = Muted)
-                        }
-                        Text("进入 →", style = MaterialTheme.typography.labelLarge)
-                    }
-                }
-            }
-        }
-        item {
-            SectionTitle("今日待办", "${tasks.count { it.status == TaskStatus.DONE }} / ${tasks.size}")
-            Spacer(Modifier.height(8.dp))
-            ZCard {
-                if (tasks.isEmpty()) {
-                    Text("今天没有待办，给自己留一点从容。", style = MaterialTheme.typography.bodyMedium, color = Muted)
-                } else tasks.forEach { task ->
-                    TaskRow(
-                        task = task,
-                        phase = controller.smartEngine.taskPhase(task, now),
-                        onToggle = { controller.toggleTask(task.id) },
-                        compact = true,
-                    )
-                    if (task != tasks.last()) Divider(color = Line)
-                }
-            }
-        }
-        item {
-            SectionTitle("今日日程", "${events.size} 项")
-            Spacer(Modifier.height(8.dp))
-            ZCard {
-                if (events.isEmpty()) {
-                    Text("今天还没有日程安排。", style = MaterialTheme.typography.bodyMedium, color = Muted)
-                } else events.forEach { event ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.width(62.dp)) {
-                            Text(event.startTime, style = MaterialTheme.typography.labelLarge, color = Blue)
-                            Text(event.endTime, style = MaterialTheme.typography.labelMedium, color = Muted)
-                        }
-                        Box(Modifier.width(4.dp).height(46.dp).clip(CircleShape).background(Lime))
-                        Spacer(Modifier.width(13.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(event.title, style = MaterialTheme.typography.titleMedium)
-                            if (event.tags.isNotEmpty()) Text(event.tags.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = Muted)
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -257,8 +169,15 @@ private fun ExpandableTaskCard(
         if (expanded) {
             Divider(color = Line)
             Spacer(Modifier.height(12.dp))
-            DetailLine("日期与时间", "${task.dueDate ?: "未设置"}  ${task.scheduledTime ?: "未设置"}")
-            DetailLine("持续时间", task.durationInput.ifBlank { durationText(task.estimateMinutes) })
+            DetailLine("类型", if (task.isTodo) "待办" else "日程")
+            if (task.isTodo) {
+                DetailLine("日期范围", "${task.dueDate ?: "未设置"} 至 ${task.endDate ?: task.dueDate ?: "未设置"}")
+            } else {
+                DetailLine("日期与时间", "${task.dueDate ?: "未设置"}  ${task.scheduledTime ?: "未设置"}")
+                DetailLine("持续时间", task.durationInput.ifBlank { durationText(task.estimateMinutes) })
+            }
+            DetailLine("紧急程度", if (task.urgent) "紧急" else "不紧急")
+            DetailLine("重要程度", if (task.important) "重要" else "不重要")
             DetailLine("具体内容", task.content.ifBlank { "未填写" })
             DetailLine("标签", task.tags.ifEmpty { listOf("未添加") }.joinToString(" · "))
             Spacer(Modifier.height(14.dp))
@@ -290,17 +209,18 @@ private fun TaskDateView(controller: AppController) {
         item {
             ZCard(color = Lime.copy(alpha = .38f)) {
                 Text("每日时间条", style = MaterialTheme.typography.titleMedium)
-                Text("空白代表可用时间，深色区块代表已经安排的日程或待办。", style = MaterialTheme.typography.bodyMedium, color = Muted)
+                Text("空白代表可用时间，深灰色区块代表日程；待办不占据时间条。", style = MaterialTheme.typography.bodyMedium, color = Muted)
             }
             Spacer(Modifier.height(12.dp))
         }
         items((0L..13L).map(start::plusDays)) { date ->
             val tasks = controller.data.tasks.mapNotNull { task -> controller.smartEngine.taskSegmentOn(task, date)?.let { task to it } }
             val events = controller.data.events.filter { it.date == date.toString() }
+            val todos = controller.data.tasks.filter { it.isTodo && controller.smartEngine.taskOccursOn(it, date) }
             ZCard(modifier = Modifier.padding(bottom = 10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(date.format(DateTimeFormatter.ofPattern("M月d日 E", Locale.CHINA)), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    Text("${tasks.size + events.size} 项", style = MaterialTheme.typography.labelMedium, color = Muted)
+                    Text("${tasks.size + events.size + todos.size} 项", style = MaterialTheme.typography.labelMedium, color = Muted)
                 }
                 Spacer(Modifier.height(13.dp))
                 DayTimeline(tasks, events)
@@ -312,6 +232,26 @@ private fun TaskDateView(controller: AppController) {
                     events.map { "${it.startTime} ${it.title}" }).sorted().take(4).forEach {
                     Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 7.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+                if (todos.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text("待办", style = MaterialTheme.typography.labelLarge, color = Success)
+                    todos.sortedBy { it.title }.forEach { task ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { controller.toggleTask(task.id) }.padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(if (task.status == TaskStatus.DONE) "✓" else "○", color = if (task.status == TaskStatus.DONE) Success else Muted)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                task.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (task.status == TaskStatus.DONE) Muted else Ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
             }
         }
         item { Spacer(Modifier.height(100.dp)) }
@@ -320,6 +260,7 @@ private fun TaskDateView(controller: AppController) {
 
 @Composable
 private fun DayTimeline(tasks: List<Pair<TaskItem, TaskTimeSegment>>, events: List<CalendarEvent>) {
+    val occupiedGray = Color(0xFF555861)
     Canvas(Modifier.fillMaxWidth().height(28.dp).clip(RoundedCornerShape(8.dp)).background(PaperDeep)) {
         fun drawSegment(startMinutes: Int, duration: Int, color: Color) {
             val left = size.width * (startMinutes.coerceIn(0, 1440) / 1440f)
@@ -329,10 +270,10 @@ private fun DayTimeline(tasks: List<Pair<TaskItem, TaskTimeSegment>>, events: Li
         events.forEach { event ->
             val start = timeMinutes(event.startTime)
             val end = timeMinutes(event.endTime)
-            drawSegment(start, (end - start).coerceAtLeast(1), Ink.copy(alpha = .72f))
+            drawSegment(start, (end - start).coerceAtLeast(1), occupiedGray)
         }
         tasks.forEach { (task, segment) ->
-            val color = when (task.status) { TaskStatus.DONE -> Muted; TaskStatus.TODO -> Ink }
+            val color = when (task.status) { TaskStatus.DONE -> occupiedGray.copy(alpha = .45f); TaskStatus.TODO -> occupiedGray }
             drawSegment(segment.startMinute, segment.durationMinutes, color)
         }
     }
@@ -550,6 +491,12 @@ fun GoalsScreen(controller: AppController) {
             if (controller.data.goals.isEmpty()) item { EmptyState("标", "创建一个长期目标", "目标不会进入日程、待办或逾期提醒。") }
             items(controller.data.goals, key = { it.id }) { goal ->
                 val progress = controller.smartEngine.goalProgress(goal)
+                val animatedProgress by animateFloatAsState(
+                    targetValue = progress / 100f,
+                    animationSpec = tween(durationMillis = 1400, easing = FastOutSlowInEasing),
+                    label = "goal-progress-${goal.id}",
+                )
+                val animatedPercent = (animatedProgress * 100).roundToInt().coerceIn(0, 100)
                 ZCard(color = if (goal.isCompleted) Lime.copy(alpha = .25f) else Color.White) {
                     Row(verticalAlignment = Alignment.Top) {
                         GoalCheck(checked = goal.isCompleted, onClick = { controller.toggleGoal(goal.id) })
@@ -558,14 +505,14 @@ fun GoalsScreen(controller: AppController) {
                             Text(goal.title, style = MaterialTheme.typography.titleLarge, color = if (goal.isCompleted) Muted else Ink)
                             Text("截止 ${friendlyDate(goal.deadline)}", style = MaterialTheme.typography.labelMedium, color = Muted)
                         }
-                        Text("$progress%", style = MaterialTheme.typography.titleLarge)
+                        Text("$animatedPercent%", style = MaterialTheme.typography.titleLarge)
                     }
                     if (goal.content.isNotBlank()) {
                         Spacer(Modifier.height(12.dp))
                         Text(goal.content, style = MaterialTheme.typography.bodyMedium, color = Muted)
                     }
                     Spacer(Modifier.height(14.dp))
-                    LinearProgressIndicator(progress = progress / 100f, modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape), color = Ink, trackColor = PaperDeep)
+                    LinearProgressIndicator(progress = animatedProgress, modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape), color = Ink, trackColor = PaperDeep)
                     if (goal.subtasks.isNotEmpty()) {
                         Spacer(Modifier.height(12.dp))
                         Text("子任务", style = MaterialTheme.typography.labelLarge)

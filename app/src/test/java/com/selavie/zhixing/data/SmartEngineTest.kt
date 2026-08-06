@@ -76,6 +76,46 @@ class SmartEngineTest {
     }
 
     @Test
+    fun `todo appears throughout date range without occupying timeline`() {
+        val todo = TaskItem(
+            title = "跨日待办",
+            isTodo = true,
+            dueDate = "2026-08-05",
+            endDate = "2026-08-07",
+            scheduledTime = null,
+            durationInput = "",
+        )
+        assertFalse(engine.taskOccursOn(todo, LocalDate.of(2026, 8, 4)))
+        assertTrue(engine.taskOccursOn(todo, LocalDate.of(2026, 8, 5)))
+        assertTrue(engine.taskOccursOn(todo, LocalDate.of(2026, 8, 6)))
+        assertTrue(engine.taskOccursOn(todo, LocalDate.of(2026, 8, 7)))
+        assertFalse(engine.taskOccursOn(todo, LocalDate.of(2026, 8, 8)))
+        assertNull(engine.taskSegmentOn(todo, LocalDate.of(2026, 8, 6)))
+    }
+
+    @Test
+    fun `todo phase follows inclusive date range`() {
+        val todo = TaskItem(
+            title = "日期待办",
+            isTodo = true,
+            dueDate = "2026-08-05",
+            endDate = "2026-08-07",
+            scheduledTime = null,
+        )
+        assertEquals(TaskPhase.UPCOMING, engine.taskPhase(todo, LocalDateTime.of(2026, 8, 4, 23, 59)))
+        assertEquals(TaskPhase.IN_PROGRESS, engine.taskPhase(todo, LocalDateTime.of(2026, 8, 7, 23, 59)))
+        assertEquals(TaskPhase.OVERDUE, engine.taskPhase(todo, LocalDateTime.of(2026, 8, 8, 0, 0)))
+    }
+
+    @Test
+    fun `urgency and importance map to four quadrants`() {
+        assertEquals(TaskQuadrant.IMPORTANT_URGENT, TaskQuadrant.from(urgent = true, important = true))
+        assertEquals(TaskQuadrant.IMPORTANT_NOT_URGENT, TaskQuadrant.from(urgent = false, important = true))
+        assertEquals(TaskQuadrant.NOT_IMPORTANT_URGENT, TaskQuadrant.from(urgent = true, important = false))
+        assertEquals(TaskQuadrant.NOT_IMPORTANT_NOT_URGENT, TaskQuadrant.from(urgent = false, important = false))
+    }
+
+    @Test
     fun `goal progress is independent from schedule tasks`() {
         val goal = GoalItem(
             title = "完成应用",

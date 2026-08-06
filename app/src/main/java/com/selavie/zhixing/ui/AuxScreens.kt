@@ -36,7 +36,7 @@ fun CalendarScreen(controller: AppController, now: java.time.LocalDateTime, onBa
     var openedReview by remember { mutableStateOf<ReviewEntry?>(null) }
     val monday = selected.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
     val events = controller.data.events.filter { it.date == selected.toString() }.sortedBy { it.startTime }
-    val tasks = controller.data.tasks.filter { controller.smartEngine.taskSegmentOn(it, selected) != null }.sortedBy {
+    val tasks = controller.data.tasks.filter { controller.smartEngine.taskOccursOn(it, selected) }.sortedBy {
         controller.smartEngine.taskSegmentOn(it, selected)?.startMinute ?: Int.MAX_VALUE
     }
     val review = controller.data.reviews.firstOrNull { it.date == selected.toString() }

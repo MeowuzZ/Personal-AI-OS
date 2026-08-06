@@ -16,7 +16,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.selavie.zhixing.model.Priority
 import com.selavie.zhixing.model.TaskItem
 import com.selavie.zhixing.model.TaskPhase
 import com.selavie.zhixing.model.TaskStatus
@@ -124,9 +123,16 @@ fun TaskRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
-                task.dueDate?.let { Text(friendlyDate(it), style = MaterialTheme.typography.labelMedium, color = if (phase == TaskPhase.OVERDUE) Coral else Muted) }
-                task.scheduledTime?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = Blue) }
-                Text(task.durationInput.ifBlank { durationText(task.estimateMinutes) }, style = MaterialTheme.typography.labelMedium, color = Muted)
+                Text(if (task.isTodo) "待办" else "日程", style = MaterialTheme.typography.labelMedium, color = if (task.isTodo) Success else Blue)
+                task.dueDate?.let { start ->
+                    val end = task.endDate
+                    val dateText = if (task.isTodo && end != null && end != start) "${friendlyDate(start)}—${friendlyDate(end)}" else friendlyDate(start)
+                    Text(dateText, style = MaterialTheme.typography.labelMedium, color = if (phase == TaskPhase.OVERDUE) Coral else Muted)
+                }
+                if (!task.isTodo) {
+                    task.scheduledTime?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = Blue) }
+                    Text(task.durationInput.ifBlank { durationText(task.estimateMinutes) }, style = MaterialTheme.typography.labelMedium, color = Muted)
+                }
             }
         }
         TaskPhaseTag(phase)
@@ -142,12 +148,6 @@ fun TaskPhaseTag(phase: TaskPhase) {
         TaskPhase.UPCOMING -> Blue.copy(alpha = .1f) to Blue
     }
     Tag(phase.label, background, foreground)
-}
-
-@Composable
-fun PriorityDot(priority: Priority) {
-    val color = when (priority) { Priority.HIGH -> Coral; Priority.MEDIUM -> Blue; Priority.LOW -> Success }
-    Box(Modifier.size(8.dp).clip(CircleShape).background(color))
 }
 
 @Composable

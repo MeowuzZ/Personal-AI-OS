@@ -112,60 +112,95 @@ fun CaptureDialog(engine: SmartEngine, onDismiss: () -> Unit, onConfirm: (Captur
 fun TaskEditorDialog(task: TaskItem?, onDismiss: () -> Unit, onSave: (TaskItem) -> Unit) {
     val engine = remember { SmartEngine() }
     var title by remember(task?.id) { mutableStateOf(task?.title.orEmpty()) }
+    var isTodo by remember(task?.id) { mutableStateOf(task?.isTodo ?: false) }
     var due by remember(task?.id) { mutableStateOf(DateWheelValue.from(task?.dueDate)) }
+    var endDate by remember(task?.id) { mutableStateOf(DateWheelValue.from(task?.endDate ?: task?.dueDate)) }
     var startTime by remember(task?.id) { mutableStateOf(TimeWheelValue.from(task?.scheduledTime, java.time.LocalTime.of(9, 0))) }
     var durationInput by remember(task?.id) { mutableStateOf(task?.durationInput?.ifBlank { null } ?: durationText(task?.estimateMinutes ?: 30)) }
     var content by remember(task?.id) { mutableStateOf(task?.content.orEmpty()) }
     var tags by remember(task?.id) { mutableStateOf(task?.tags?.joinToString("，").orEmpty()) }
-    var priority by remember(task?.id) { mutableStateOf(task?.priority ?: Priority.MEDIUM) }
+    var urgent by remember(task?.id) { mutableStateOf(task?.urgent ?: false) }
+    var important by remember(task?.id) { mutableStateOf(task?.important ?: true) }
     var invalidDate by remember { mutableStateOf(false) }
+    var invalidRange by remember { mutableStateOf(false) }
     var overdueTask by remember { mutableStateOf<TaskItem?>(null) }
     val duration = engine.parseDurationMinutes(durationInput)
-    val formValid = title.isNotBlank() && duration != null
-    fun result(date: LocalDate): TaskItem = (task ?: TaskItem(title = title.trim())).copy(
+    val formValid = title.isNotBlank() && (isTodo || duration != null)
+    fun result(date: LocalDate, end: LocalDate): TaskItem = (task ?: TaskItem(title = title.trim())).copy(
         title = title.trim(),
+        isTodo = isTodo,
+        urgent = urgent,
+        important = important,
         dueDate = date.toString(),
-        scheduledTime = startTime.asText(),
-        estimateMinutes = duration ?: 30,
-        durationInput = durationInput.trim(),
+        endDate = end.toString(),
+        scheduledTime = if (isTodo) null else startTime.asText(),
+        estimateMinutes = if (isTodo) 30 else duration ?: 30,
+        durationInput = if (isTodo) "" else durationInput.trim(),
         content = content.trim(),
         tags = tags.split(',', '，').map(String::trim).filter(String::isNotBlank).distinct(),
-        priority = priority,
     )
-    DialogShell(if (task == null) "新建任务" else "编辑任务", "持续时间支持自然语言，例如 90分钟、2小时30分钟或 2天。", onDismiss) {
+    DialogShell(if (task == null) "新建任务" else "编辑任务", "勾选待办后只需设置日期范围；未勾选则作为占用时间条的日程。", onDismiss) {
         OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("任务标题") }, singleLine = true, shape = RoundedCornerShape(14.dp))
         Spacer(Modifier.height(14.dp))
-        DateWheelPicker(due) { due = it }
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White).clickable { isTodo = !isTodo }.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = isTodo, onCheckedChange = { isTodo = it })
+            Column(Modifier.weight(1f)) {
+                Text("待办", style = MaterialTheme.typography.titleMedium)
+                Text("无需具体时间，只设置开始与结束日期", style = MaterialTheme.typography.bodyMedium, color = Muted)
+            }
+        }
         Spacer(Modifier.height(14.dp))
-        TimeWheelPicker("开始时间", startTime) { startTime = it }
-        Spacer(Modifier.height(14.dp))
-        OutlinedTextField(
-            durationInput,
-            { durationInput = it },
-            Modifier.fillMaxWidth(),
-            label = { Text("持续时间") },
-            supportingText = { Text(if (duration == null) "请输入有效时长，如 1天2小时" else "将按 ${durationText(duration)} 计算，可自动延续至后续日期") },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-        )
+        DateWheelPicker(due, if (isTodo) "开始日期" else "日期") { due = it }
+        if (isTodo) {
+            Spacer(Modifier.height(14.dp))
+            DateWheelPicker(endDate, "结束日期") { endDate = it }
+        } else {
+            Spacer(Modifier.height(14.dp))
+            TimeWheelPicker("开始时间", startTime) { startTime = it }
+            Spacer(Modifier.height(14.dp))
+            OutlinedTextField(
+                durationInput,
+                { durationInput = it },
+                Modifier.fillMaxWidth(),
+                label = { Text("持续时间") },
+                supportingText = { Text(if (duration == null) "请输入有效时长，如 1天2小时" else "将按 ${durationText(duration)} 计算，可自动延续至后续日期") },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+            )
+        }
         Spacer(Modifier.height(10.dp))
         OutlinedTextField(content, { content = it }, Modifier.fillMaxWidth().heightIn(min = 110.dp), label = { Text("具体内容") }, shape = RoundedCornerShape(14.dp))
         Spacer(Modifier.height(10.dp))
         OutlinedTextField(tags, { tags = it }, Modifier.fillMaxWidth(), label = { Text("标签（用逗号分隔）") }, singleLine = true, shape = RoundedCornerShape(14.dp))
         Spacer(Modifier.height(14.dp))
-        Text("优先级", style = MaterialTheme.typography.labelLarge)
+        Text("选择紧急程度", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Priority.values().forEach { item -> FilterChip(selected = priority == item, onClick = { priority = item }, label = { Text(item.label) }) }
+            listOf(true to "紧急", false to "不紧急").forEach { (value, label) ->
+                FilterChip(selected = urgent == value, onClick = { urgent = value }, label = { Text(label) })
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("选择重要程度", style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(true to "重要", false to "不重要").forEach { (value, label) ->
+                FilterChip(selected = important == value, onClick = { important = value }, label = { Text(label) })
+            }
         }
         Spacer(Modifier.height(18.dp))
         PrimaryButton(
             if (task == null) "创建任务" else "保存修改",
             onClick = {
                 val date = due.toLocalDateOrNull()
-                if (date == null) {
+                val end = if (isTodo) endDate.toLocalDateOrNull() else date
+                if (date == null || end == null) {
                     invalidDate = true
+                } else if (end.isBefore(date)) {
+                    invalidRange = true
                 } else {
-                    val value = result(date)
+                    val value = result(date, end)
                     if (engine.taskPhase(value, LocalDateTime.now()) == TaskPhase.OVERDUE) overdueTask = value
                     else onSave(value)
                 }
@@ -175,6 +210,7 @@ fun TaskEditorDialog(task: TaskItem?, onDismiss: () -> Unit, onSave: (TaskItem) 
         )
     }
     if (invalidDate) InvalidDateDialog { invalidDate = false }
+    if (invalidRange) AlertMessageDialog("日期范围无效", "结束日期不能早于开始日期。") { invalidRange = false }
     overdueTask?.let { value ->
         AlertDialog(
             onDismissRequest = { overdueTask = null },

@@ -21,13 +21,13 @@ class AppController(
     fun beginDemo() = commit(repository.demoData())
 
     fun addTask(task: TaskItem, audit: Boolean = true) {
-        val normalized = task.copy(estimateMinutes = task.estimateMinutes.coerceAtLeast(1))
+        val normalized = normalizeTask(task)
         val entry = AuditEntry(action = "创建任务", summary = normalized.title, beforeJson = "remove-task:${normalized.id}", undoable = true)
         commit(data.copy(tasks = data.tasks + normalized, audits = if (audit) listOf(entry) + data.audits else data.audits))
     }
 
     fun updateTask(task: TaskItem) {
-        val normalized = task.copy(estimateMinutes = task.estimateMinutes.coerceAtLeast(1))
+        val normalized = normalizeTask(task)
         commit(data.copy(
             tasks = data.tasks.map { if (it.id == task.id) normalized else it },
             audits = listOf(AuditEntry(action = "编辑任务", summary = task.title)) + data.audits,
@@ -105,12 +105,19 @@ class AppController(
 
     fun handleCapture(draft: CaptureDraft) {
         when (draft.type) {
-            ItemType.TASK -> addTask(TaskItem(
-                title = draft.title,
-                dueDate = draft.dueDate ?: LocalDate.now().toString(),
-                scheduledTime = LocalTime.now().withSecond(0).withNano(0).toString().take(5),
-                content = draft.rawContent,
-            ))
+            ItemType.TASK -> {
+                val date = draft.dueDate ?: LocalDate.now().toString()
+                val isTodo = "待办" in draft.rawContent
+                addTask(TaskItem(
+                    title = draft.title,
+                    isTodo = isTodo,
+                    dueDate = date,
+                    endDate = date,
+                    scheduledTime = if (isTodo) null else LocalTime.now().withSecond(0).withNano(0).toString().take(5),
+                    durationInput = if (isTodo) "" else "30分钟",
+                    content = draft.rawContent,
+                ))
+            }
             ItemType.NOTE -> addDiary(DiaryEntry(title = draft.title.take(24), content = draft.rawContent))
             ItemType.EVENT -> addEvent(CalendarEvent(
                 title = draft.title,
@@ -183,4 +190,11 @@ class AppController(
         data = value
         repository.save(value)
     }
+
+    private fun normalizeTask(task: TaskItem): TaskItem = task.copy(
+        endDate = task.endDate ?: task.dueDate,
+        scheduledTime = if (task.isTodo) null else task.scheduledTime,
+        estimateMinutes = task.estimateMinutes.coerceAtLeast(1),
+        durationInput = if (task.isTodo) "" else task.durationInput,
+    )
 }

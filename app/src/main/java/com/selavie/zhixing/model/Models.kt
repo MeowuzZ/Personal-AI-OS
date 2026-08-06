@@ -7,15 +7,32 @@ import java.util.UUID
 enum class ItemType(val label: String) { TASK("任务"), NOTE("日记"), EVENT("日程") }
 enum class TaskStatus { TODO, DONE }
 enum class TaskPhase(val label: String) { UPCOMING("待开始"), IN_PROGRESS("进行中"), OVERDUE("逾期"), DONE("已完成") }
-enum class Priority(val label: String, val rank: Int) { HIGH("高", 3), MEDIUM("中", 2), LOW("低", 1) }
+enum class TaskQuadrant(val numeral: String, val label: String) {
+    IMPORTANT_URGENT("Ⅰ", "重要且紧急"),
+    IMPORTANT_NOT_URGENT("Ⅱ", "重要不紧急"),
+    NOT_IMPORTANT_URGENT("Ⅲ", "紧急不重要"),
+    NOT_IMPORTANT_NOT_URGENT("Ⅳ", "不重要不紧急");
+
+    companion object {
+        fun from(urgent: Boolean, important: Boolean): TaskQuadrant = when {
+            important && urgent -> IMPORTANT_URGENT
+            important -> IMPORTANT_NOT_URGENT
+            urgent -> NOT_IMPORTANT_URGENT
+            else -> NOT_IMPORTANT_NOT_URGENT
+        }
+    }
+}
 enum class GoalCompletionMode { NONE, MANUAL, AUTOMATIC }
 
 data class TaskItem(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
     val status: TaskStatus = TaskStatus.TODO,
-    val priority: Priority = Priority.MEDIUM,
+    val isTodo: Boolean = false,
+    val urgent: Boolean = false,
+    val important: Boolean = true,
     val dueDate: String? = LocalDate.now().toString(),
+    val endDate: String? = dueDate,
     val scheduledTime: String? = "09:00",
     val estimateMinutes: Int = 30,
     val durationInput: String = "30分钟",
@@ -67,6 +84,8 @@ data class CalendarEvent(
     val content: String = "",
     val tags: List<String> = emptyList(),
     val source: String = "本地",
+    val urgent: Boolean = false,
+    val important: Boolean = true,
 )
 
 data class AuditEntry(

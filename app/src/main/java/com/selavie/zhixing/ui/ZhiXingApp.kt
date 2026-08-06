@@ -66,7 +66,7 @@ fun ZhiXingApp(
     Box(Modifier.fillMaxSize().background(Paper).statusBarsPadding()) {
         Scaffold(
             containerColor = Paper,
-            bottomBar = { TextOnlyNavigation(screen = screen, onNavigate = navigate) },
+            bottomBar = { TextOnlyNavigation(screen = screen, motto = controller.data.preferences.motto, onNavigate = navigate) },
             floatingActionButton = {
                 FloatingActionButton(
                     onClick = { captureOpen = true },
@@ -130,29 +130,40 @@ fun ZhiXingApp(
 }
 
 @Composable
-private fun TextOnlyNavigation(screen: AppScreen, onNavigate: (AppScreen) -> Unit) {
+private fun TextOnlyNavigation(screen: AppScreen, motto: String, onNavigate: (AppScreen) -> Unit) {
     Surface(color = Color.White, shadowElevation = 8.dp) {
-        Row(
-            modifier = Modifier.fillMaxWidth().navigationBarsPadding().height(70.dp).padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            primaryScreens.forEach { item ->
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(if (screen == item) Lime else Color.Transparent)
-                        .clickable { onNavigate(item) }
-                        .padding(vertical = 11.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        item.label,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = if (screen == item) Ink else Muted,
-                    )
+        Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                primaryScreens.forEach { item ->
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(if (screen == item) Lime else Color.Transparent)
+                            .clickable { onNavigate(item) }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            item.label,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (screen == item) Ink else Muted,
+                        )
+                    }
                 }
             }
+            Text(
+                motto.ifBlank { "把想法变成今天的行动" },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 5.dp),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
+                color = Muted,
+                maxLines = 1,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
         }
     }
 }

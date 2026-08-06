@@ -26,6 +26,14 @@ class SmartEngine {
     fun taskPhase(task: TaskItem, now: LocalDateTime = LocalDateTime.now()): TaskPhase {
         if (task.status == TaskStatus.DONE) return TaskPhase.DONE
         val date = task.dueDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return TaskPhase.UPCOMING
+        if (task.isTodo) {
+            val endDate = task.endDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: date
+            return when {
+                now.toLocalDate().isBefore(date) -> TaskPhase.UPCOMING
+                now.toLocalDate().isAfter(endDate) -> TaskPhase.OVERDUE
+                else -> TaskPhase.IN_PROGRESS
+            }
+        }
         val time = task.scheduledTime?.let { runCatching { LocalTime.parse(it) }.getOrNull() }
         if (time == null) return if (date.isBefore(now.toLocalDate())) TaskPhase.OVERDUE else TaskPhase.UPCOMING
         val start = LocalDateTime.of(date, time)
@@ -62,6 +70,7 @@ class SmartEngine {
     }
 
     fun taskSegmentOn(task: TaskItem, date: LocalDate): TaskTimeSegment? {
+        if (task.isTodo) return null
         val startDate = task.dueDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return null
         val startTime = task.scheduledTime?.let { runCatching { LocalTime.parse(it) }.getOrNull() } ?: return null
         val start = LocalDateTime.of(startDate, startTime)
@@ -77,6 +86,13 @@ class SmartEngine {
             startMinute = Duration.between(dayStart, overlapStart).toMinutes().toInt(),
             durationMinutes = Duration.between(overlapStart, overlapEnd).toMinutes().toInt(),
         )
+    }
+
+    fun taskOccursOn(task: TaskItem, date: LocalDate): Boolean {
+        if (!task.isTodo) return taskSegmentOn(task, date) != null
+        val start = task.dueDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return false
+        val end = task.endDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: start
+        return !date.isBefore(start) && !date.isAfter(end)
     }
 
     fun ask(question: String, data: AppData): AssistantReply {
@@ -95,7 +111,8 @@ class SmartEngine {
         }
         if (data.preferences.includeTasksInAi) data.tasks.forEach { task ->
             score(question, task.title + task.content + task.tags.joinToString()).takeIf { it > 0 }?.let {
-                sources += Citation(task.id, task.title, "任务", "${taskPhase(task).label} · ${task.dueDate ?: "未设置"} ${task.scheduledTime ?: ""}", task.createdAt)
+                val range = if (task.isTodo) "${task.dueDate ?: "未设置"}—${task.endDate ?: task.dueDate ?: "未设置"}" else "${task.dueDate ?: "未设置"} ${task.scheduledTime ?: ""}"
+                sources += Citation(task.id, task.title, if (task.isTodo) "待办" else "日程", "${taskPhase(task).label} · $range", task.createdAt)
             }
         }
         if (data.preferences.includeGoalsInAi) data.goals.forEach { goal ->
@@ -112,17 +129,18 @@ class SmartEngine {
 
     fun dailyReview(data: AppData, date: LocalDate): String {
         val dateText = date.toString()
-        val dayTasks = data.tasks.filter { it.dueDate == dateText }.sortedBy { it.scheduledTime ?: "99:99" }
+        val dayTasks = data.tasks.filter { taskOccursOn(it, date) }.sortedBy { it.scheduledTime ?: "99:99" }
         val completed = dayTasks.filter { task ->
             task.completedAt?.take(10) == dateText || (task.status == TaskStatus.DONE && task.completedAt == null)
         }
-        val totalMinutes = dayTasks.sumOf { it.estimateMinutes.coerceAtLeast(1) }
+        val totalMinutes = dayTasks.filterNot { it.isTodo }.sumOf { taskSegmentOn(it, date)?.durationMinutes ?: 0 }
         return buildString {
             appendLine("每日复盘 · $dateText")
             appendLine()
             appendLine("今日完成 ${completed.size} / ${dayTasks.size} 项")
             if (completed.isEmpty()) appendLine("• 今天还没有标记完成的待办") else completed.forEach { task ->
-                appendLine("• ${task.scheduledTime ?: "--:--"} ${task.title}（${durationText(task.estimateMinutes)}）")
+                if (task.isTodo) appendLine("• 待办 ${task.title}")
+                else appendLine("• ${task.scheduledTime ?: "--:--"} ${task.title}（${durationText(task.estimateMinutes)}）")
                 if (task.content.isNotBlank()) appendLine("  ${task.content}")
             }
             val unfinished = dayTasks.filter { it.status == TaskStatus.TODO }

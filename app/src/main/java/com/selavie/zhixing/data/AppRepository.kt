@@ -31,7 +31,6 @@ class AppRepository(context: Context) {
     fun demoData(): AppData {
         val today = LocalDate.now()
         val now = LocalTime.now()
-        val pastTime = now.minusHours(2).format(DateTimeFormatter.ofPattern("HH:mm"))
         val futureTime = now.plusHours(2).format(DateTimeFormatter.ofPattern("HH:mm"))
         val goal = GoalItem(
             title = "完成 Personal AI OS 安卓版",
@@ -45,10 +44,10 @@ class AppRepository(context: Context) {
         )
         return AppData(
             tasks = listOf(
-                TaskItem(title = "整理本周最重要的事项", priority = Priority.HIGH, dueDate = today.toString(), scheduledTime = pastTime, estimateMinutes = 30, durationInput = "30分钟", content = "只保留真正影响本周结果的事项。", tags = listOf("规划")),
-                TaskItem(title = "完成安卓端任务视图", priority = Priority.HIGH, dueDate = today.toString(), scheduledTime = futureTime, estimateMinutes = 90, durationInput = "1小时30分钟", content = "完成列表、日期和标签三种视图。", tags = listOf("Android", "开发")),
-                TaskItem(title = "阅读离线 AI 检索资料", priority = Priority.MEDIUM, dueDate = today.plusDays(1).toString(), scheduledTime = "20:00", estimateMinutes = 45, durationInput = "45分钟", content = "整理关键结论到日记。", tags = listOf("学习")),
-                TaskItem(title = "明确新版交互范围", status = TaskStatus.DONE, priority = Priority.MEDIUM, dueDate = today.toString(), scheduledTime = "08:30", estimateMinutes = 40, durationInput = "40分钟", content = "按日常使用场景收敛功能。", tags = listOf("产品"), completedAt = LocalDateTime.now().minusHours(1).toString()),
+                TaskItem(title = "整理本周最重要的事项", isTodo = true, urgent = true, important = true, dueDate = today.toString(), endDate = today.plusDays(2).toString(), scheduledTime = null, durationInput = "", content = "只保留真正影响本周结果的事项。", tags = listOf("规划")),
+                TaskItem(title = "完成安卓端任务视图", urgent = false, important = true, dueDate = today.toString(), endDate = today.toString(), scheduledTime = futureTime, estimateMinutes = 90, durationInput = "1小时30分钟", content = "完成列表、日期和标签三种视图。", tags = listOf("Android", "开发")),
+                TaskItem(title = "阅读离线 AI 检索资料", isTodo = true, urgent = false, important = true, dueDate = today.toString(), endDate = today.plusDays(1).toString(), scheduledTime = null, durationInput = "", content = "整理关键结论到日记。", tags = listOf("学习")),
+                TaskItem(title = "明确新版交互范围", status = TaskStatus.DONE, urgent = false, important = false, dueDate = today.toString(), endDate = today.toString(), scheduledTime = "08:30", estimateMinutes = 40, durationInput = "40分钟", content = "按日常使用场景收敛功能。", tags = listOf("产品"), completedAt = LocalDateTime.now().minusHours(1).toString()),
             ),
             diaries = listOf(
                 DiaryEntry(date = today.toString(), title = "产品原则：先可信，再聪明", content = "任何 AI 结论都要能追溯到我的数据；创建、更新和删除必须先预览，再由我确认。"),
@@ -88,19 +87,26 @@ class AppRepository(context: Context) {
             put("onboarded", data.preferences.onboarded)
         })
         put("exportedAt", LocalDateTime.now().toString())
-        put("format", "zhixing-os-v3")
+        put("format", "zhixing-os-v4")
     }
 
     private fun decode(root: JSONObject): AppData {
-        val tasks = root.array("tasks").mapObjects { o -> TaskItem(
+        val tasks = root.array("tasks").mapObjects { o ->
+            val legacyPriority = o.optString("priority", "MEDIUM")
+            val dueDate = o.nullable("dueDate")
+            val isTodo = if (o.has("isTodo")) o.optBoolean("isTodo") else o.nullable("scheduledTime") == null
+            TaskItem(
             id = o.string("id"),
             title = o.string("title"),
             status = enumValueOr(o.string("status"), TaskStatus.TODO),
-            priority = enumValueOr(o.string("priority"), Priority.MEDIUM),
-            dueDate = o.nullable("dueDate"),
-            scheduledTime = o.nullable("scheduledTime"),
+            isTodo = isTodo,
+            urgent = if (o.has("urgent")) o.optBoolean("urgent") else legacyPriority == "HIGH",
+            important = if (o.has("important")) o.optBoolean("important") else legacyPriority != "LOW",
+            dueDate = dueDate,
+            endDate = o.nullable("endDate") ?: dueDate,
+            scheduledTime = if (isTodo) null else o.nullable("scheduledTime"),
             estimateMinutes = o.optInt("estimateMinutes", 30).coerceAtLeast(1),
-            durationInput = o.optString("durationInput").ifBlank { durationLabel(o.optInt("estimateMinutes", 30)) },
+            durationInput = if (isTodo) "" else o.optString("durationInput").ifBlank { durationLabel(o.optInt("estimateMinutes", 30)) },
             content = o.optString("content"),
             tags = o.array("tags").mapStrings(),
             createdAt = o.optString("createdAt", LocalDateTime.now().toString()),
@@ -141,6 +147,7 @@ class AppRepository(context: Context) {
                 id = o.string("id"), title = o.string("title"), date = o.string("date"),
                 startTime = o.string("startTime"), endTime = o.string("endTime"),
                 content = o.optString("content"), tags = o.array("tags").mapStrings(), source = o.optString("source", "本地"),
+                urgent = o.optBoolean("urgent", false), important = o.optBoolean("important", true),
             ) },
             audits = root.array("audits").mapObjects { o -> AuditEntry(
                 id = o.string("id"), action = o.string("action"), summary = o.string("summary"),
@@ -165,8 +172,9 @@ class AppRepository(context: Context) {
     }
 
     private fun taskJson(t: TaskItem) = JSONObject().apply {
-        put("id", t.id); put("title", t.title); put("status", t.status.name); put("priority", t.priority.name)
-        putNullable("dueDate", t.dueDate); putNullable("scheduledTime", t.scheduledTime); put("estimateMinutes", t.estimateMinutes)
+        put("id", t.id); put("title", t.title); put("status", t.status.name)
+        put("isTodo", t.isTodo); put("urgent", t.urgent); put("important", t.important)
+        putNullable("dueDate", t.dueDate); putNullable("endDate", t.endDate); putNullable("scheduledTime", t.scheduledTime); put("estimateMinutes", t.estimateMinutes)
         put("durationInput", t.durationInput)
         put("content", t.content); put("tags", JSONArray(t.tags)); put("createdAt", t.createdAt); putNullable("completedAt", t.completedAt)
     }
@@ -203,6 +211,7 @@ class AppRepository(context: Context) {
     private fun eventJson(e: CalendarEvent) = JSONObject().apply {
         put("id", e.id); put("title", e.title); put("date", e.date); put("startTime", e.startTime); put("endTime", e.endTime)
         put("content", e.content); put("tags", JSONArray(e.tags)); put("source", e.source)
+        put("urgent", e.urgent); put("important", e.important)
     }
     private fun auditJson(a: AuditEntry) = JSONObject().apply {
         put("id", a.id); put("action", a.action); put("summary", a.summary); putNullable("beforeJson", a.beforeJson)
