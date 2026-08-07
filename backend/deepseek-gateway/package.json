@@ -1,0 +1,14 @@
+{
+  "name": "personal-ai-os-deepseek-gateway",
+  "private": true,
+  "version": "0.5.1",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

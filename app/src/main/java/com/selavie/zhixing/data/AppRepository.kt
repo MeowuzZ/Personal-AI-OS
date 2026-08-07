@@ -19,14 +19,14 @@ class AppRepository(context: Context) {
     }
 
     fun save(data: AppData) {
-        preferences.edit().putString(key, encode(data).toString()).apply()
+        preferences.edit().putString(key, encode(data, includeSecrets = true).toString()).apply()
     }
 
     fun clear() {
         preferences.edit().remove(key).apply()
     }
 
-    fun export(data: AppData): String = encode(data).toString(2)
+    fun export(data: AppData): String = encode(data, includeSecrets = false).toString(2)
 
     fun demoData(): AppData {
         val today = LocalDate.now()
@@ -68,7 +68,7 @@ class AppRepository(context: Context) {
         )
     }
 
-    private fun encode(data: AppData): JSONObject = JSONObject().apply {
+    private fun encode(data: AppData, includeSecrets: Boolean = true): JSONObject = JSONObject().apply {
         put("tasks", JSONArray().apply { data.tasks.forEach { put(taskJson(it)) } })
         put("diaries", JSONArray().apply { data.diaries.forEach { put(diaryJson(it)) } })
         put("goals", JSONArray().apply { data.goals.forEach { put(goalJson(it)) } })
@@ -84,6 +84,8 @@ class AppRepository(context: Context) {
             put("includeDiariesInAi", data.preferences.includeDiariesInAi)
             put("includeTasksInAi", data.preferences.includeTasksInAi)
             put("includeGoalsInAi", data.preferences.includeGoalsInAi)
+            put("aiGatewayUrl", data.preferences.aiGatewayUrl)
+            put("aiAccessToken", if (includeSecrets) data.preferences.aiAccessToken else "")
             put("onboarded", data.preferences.onboarded)
         })
         put("exportedAt", LocalDateTime.now().toString())
@@ -166,6 +168,8 @@ class AppRepository(context: Context) {
                 includeDiariesInAi = o.optBoolean("includeDiariesInAi", o.optBoolean("includeNotesInAi", true)),
                 includeTasksInAi = o.optBoolean("includeTasksInAi", true),
                 includeGoalsInAi = o.optBoolean("includeGoalsInAi", true),
+                aiGatewayUrl = o.optString("aiGatewayUrl"),
+                aiAccessToken = o.optString("aiAccessToken"),
                 onboarded = o.optBoolean("onboarded", false),
             ) } ?: UserPreferences(),
         )

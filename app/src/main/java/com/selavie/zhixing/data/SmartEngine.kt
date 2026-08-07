@@ -15,12 +15,26 @@ class SmartEngine {
             else -> ItemType.NOTE
         }
         val date = extractDate(clean, today)
+        val time = extractTime(clean)
+        val duration = parseDurationMinutes(clean) ?: 30
+        val isTodo = "待办" in clean || time == null
         val reason = when (type) {
             ItemType.TASK -> if (date != null) "识别到行动词和时间信息" else "识别到可执行的行动表达"
             ItemType.EVENT -> "识别到日程或会面表达"
             ItemType.NOTE -> "未识别到明确行动，建议保存为日记"
         }
-        return CaptureDraft(clean, type, clean.take(42), date?.toString(), reason)
+        return CaptureDraft(
+            rawContent = clean,
+            type = type,
+            title = clean.take(42),
+            dueDate = date?.toString(),
+            reason = reason,
+            endDate = date?.toString(),
+            scheduledTime = if (isTodo) null else time,
+            estimateMinutes = duration,
+            durationInput = "${duration}分钟",
+            isTodo = isTodo,
+        )
     }
 
     fun taskPhase(task: TaskItem, now: LocalDateTime = LocalDateTime.now()): TaskPhase {
@@ -151,6 +165,14 @@ class SmartEngine {
             }
             appendLine()
             appendLine("今日安排总时长：${durationText(totalMinutes)}")
+            appendLine()
+            appendLine("一点感受")
+            appendLine(when {
+                dayTasks.isEmpty() -> "我感觉今天更像是一段留白。没有任务记录不等于没有生活，也许可以补写一个让你记住今天的瞬间。"
+                completed.size == dayTasks.size -> "我感受到你今天把计划照顾得很完整。比起继续加码，也许更值得问问：哪件事真正给你带来了满足？"
+                completed.isEmpty() -> "我感觉计划与现实之间今天有些距离。这不一定代表懈怠，也可能是在提醒你重新估量精力，把最重要的一件事留到明天。"
+                else -> "我看到你既完成了一部分，也留下了一部分。也许一天的价值不只在清空列表，还在于分辨哪些事情值得继续投入。"
+            })
             if (totalMinutes > 480) {
                 appendLine()
                 append("今天安排超过 8 小时，已经很辛苦了。完成多少都不否定你的努力，记得给自己留一点休息和恢复的空间。")
@@ -225,6 +247,16 @@ class SmartEngine {
     }
 
     private fun containsDateWord(text: String) = listOf("今天", "明天", "后天", "下周", "周一", "周二", "周三", "周四", "周五", "周六", "周日").any(text::contains)
+    private fun extractTime(text: String): String? {
+        Regex("(?:上午|下午|晚上)?\\s*(\\d{1,2})(?:[:：点时](\\d{1,2})?)").find(text)?.let { match ->
+            var hour = match.groupValues[1].toIntOrNull() ?: return@let
+            val minute = match.groupValues.getOrNull(2)?.toIntOrNull() ?: 0
+            val prefix = match.value
+            if (("下午" in prefix || "晚上" in prefix) && hour in 1..11) hour += 12
+            if (hour in 0..23 && minute in 0..59) return "%02d:%02d".format(hour, minute)
+        }
+        return null
+    }
     private fun extractDate(text: String, today: LocalDate): LocalDate? = when {
         "后天" in text -> today.plusDays(2)
         "明天" in text -> today.plusDays(1)

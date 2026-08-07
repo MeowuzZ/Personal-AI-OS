@@ -1,0 +1,6 @@
+name = "personal-ai-os-deepseek-gateway"
+main = "src/index.js"
+compatibility_date = "2025-12-01"
+
+[vars]
+DEEPSEEK_MODEL = "deepseek-v4-flash"

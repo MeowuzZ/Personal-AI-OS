@@ -113,6 +113,8 @@ data class UserPreferences(
     val includeDiariesInAi: Boolean = true,
     val includeTasksInAi: Boolean = true,
     val includeGoalsInAi: Boolean = true,
+    val aiGatewayUrl: String = "",
+    val aiAccessToken: String = "",
     val onboarded: Boolean = false,
 )
 
@@ -132,7 +134,34 @@ data class CaptureDraft(
     val title: String,
     val dueDate: String? = null,
     val reason: String,
+    val endDate: String? = dueDate,
+    val scheduledTime: String? = null,
+    val estimateMinutes: Int = 30,
+    val durationInput: String = "30分钟",
+    val isTodo: Boolean = scheduledTime == null,
+    val urgent: Boolean = false,
+    val important: Boolean = true,
+    val content: String = rawContent,
+    val tags: List<String> = emptyList(),
 )
+
+fun CaptureDraft.toTaskItem(): TaskItem {
+    val start = dueDate ?: LocalDate.now().toString()
+    val safeMinutes = estimateMinutes.coerceAtLeast(1)
+    return TaskItem(
+        title = title.trim().ifBlank { rawContent.take(42).ifBlank { "未命名任务" } },
+        isTodo = isTodo,
+        urgent = urgent,
+        important = important,
+        dueDate = start,
+        endDate = endDate ?: start,
+        scheduledTime = if (isTodo) null else scheduledTime ?: "09:00",
+        estimateMinutes = safeMinutes,
+        durationInput = if (isTodo) "" else durationInput.ifBlank { "${safeMinutes}分钟" },
+        content = content.ifBlank { rawContent },
+        tags = tags,
+    )
+}
 
 data class Citation(
     val id: String,
@@ -146,4 +175,10 @@ data class AssistantReply(
     val answer: String,
     val citations: List<Citation> = emptyList(),
     val taskDraft: CaptureDraft? = null,
+)
+
+data class AiOperationResult<T>(
+    val value: T,
+    val usedRemoteModel: Boolean,
+    val notice: String? = null,
 )

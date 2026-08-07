@@ -6,6 +6,8 @@ local.properties
 # Gradle and build outputs
 .gradle/
 **/build/
+node_modules/
+.wrangler/
 
 # macOS
 .DS_Store

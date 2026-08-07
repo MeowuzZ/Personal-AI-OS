@@ -24,8 +24,11 @@ import com.selavie.zhixing.AppController
 import com.selavie.zhixing.model.AssistantReply
 import com.selavie.zhixing.model.CaptureDraft
 import com.selavie.zhixing.model.Citation
+import com.selavie.zhixing.model.TaskItem
+import com.selavie.zhixing.model.toTaskItem
 import com.selavie.zhixing.ui.theme.*
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 
 private data class ChatMessage(val text: String, val fromUser: Boolean, val reply: AssistantReply? = null)
 
@@ -38,11 +41,14 @@ fun AssistantScreen(
     var input by remember { mutableStateOf("") }
     val messages = remember {
         mutableStateListOf(
-            ChatMessage("你好，我是知行助手。我只根据你允许的数据回答；没有证据时会直接说明。你也可以让我先生成任务草稿。", false),
+            ChatMessage("你好，我是知行助手。我可以回答简单问题；涉及你的生活时只依据你允许的数据，没有证据会直接说明。你也可以让我生成任务草稿。", false),
         )
     }
     var citation by remember { mutableStateOf<Citation?>(null) }
     var reviewDate by remember { mutableStateOf<LocalDate?>(null) }
+    var draftToEdit by remember { mutableStateOf<TaskItem?>(null) }
+    var isSending by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(requestedReviewDate) {
         requestedReviewDate?.let {
@@ -53,15 +59,20 @@ fun AssistantScreen(
 
     fun submit(value: String = input) {
         val question = value.trim()
-        if (question.isBlank()) return
+        if (question.isBlank() || isSending) return
         messages += ChatMessage(question, true)
-        val reply = controller.smartEngine.ask(question, controller.data)
-        messages += ChatMessage(reply.answer, false, reply)
         input = ""
+        isSending = true
+        scope.launch {
+            val result = controller.askAssistant(question)
+            messages += ChatMessage(result.value.answer, false, result.value)
+            result.notice?.let { messages += ChatMessage("提示：$it", false) }
+            isSending = false
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader("TRUSTED AI", "助手", "回答有来源，写入先确认", action = {
+        ScreenHeader("TRUSTED AI", "助手", if (controller.isRemoteAiConfigured()) "真实模型已连接 · 写入先编辑确认" else "离线助手 · 可在个人信息页连接模型", action = {
             Box(Modifier.size(38.dp).clip(CircleShape).background(Lime), contentAlignment = Alignment.Center) {
                 Text("AI", fontWeight = FontWeight.Black, fontSize = 11.sp)
             }
@@ -84,7 +95,7 @@ fun AssistantScreen(
             }
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(listOf("最近关于安卓记录了什么？", "我有哪些未完成任务？", "创建任务：明天完成周复盘")) { suggestion ->
+                    items(listOf("番茄工作法是什么？", "我有哪些未完成任务？", "创建任务：明天下午3点完成周复盘2小时")) { suggestion ->
                         SuggestionChip(onClick = { submit(suggestion) }, label = { Text(suggestion) })
                     }
                 }
@@ -93,11 +104,15 @@ fun AssistantScreen(
                 ChatBubble(
                     message = message,
                     onCitation = { citation = it },
-                    onConfirmDraft = { draft ->
-                        controller.handleCapture(draft)
-                        messages += ChatMessage("已按你的确认创建任务，并记录到执行日志中。", false)
-                    },
+                    onEditDraft = { draft -> draftToEdit = draft.toTaskItem() },
                 )
+            }
+            if (isSending) item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Ink)
+                    Spacer(Modifier.width(9.dp))
+                    Text("正在调用助手…", style = MaterialTheme.typography.bodyMedium, color = Muted)
+                }
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
@@ -118,26 +133,65 @@ fun AssistantScreen(
                 )
                 Spacer(Modifier.width(8.dp))
                 Box(
-                    Modifier.size(52.dp).clip(CircleShape).background(if (input.isBlank()) PaperDeep else Ink).clickable(enabled = input.isNotBlank()) { submit() },
+                    Modifier.size(52.dp).clip(CircleShape).background(if (input.isBlank() || isSending) PaperDeep else Ink).clickable(enabled = input.isNotBlank() && !isSending) { submit() },
                     contentAlignment = Alignment.Center,
-                ) { Text("↑", color = if (input.isBlank()) Muted else Color.White, style = MaterialTheme.typography.titleLarge) }
+                ) { Text("↑", color = if (input.isBlank() || isSending) Muted else Color.White, style = MaterialTheme.typography.titleLarge) }
             }
         }
     }
     citation?.let { CitationDialog(it, onDismiss = { citation = null }) }
     reviewDate?.let { date -> DailyReviewDialog(controller, date, onDismiss = { reviewDate = null }) }
+    draftToEdit?.let { draft ->
+        TaskEditorDialog(
+            task = draft,
+            onDismiss = { draftToEdit = null },
+            isNew = true,
+        ) {
+            controller.addTask(it)
+            draftToEdit = null
+            messages += ChatMessage("任务已创建，并记录到执行日志中。", false)
+        }
+    }
 }
 
 @Composable
 private fun DailyReviewDialog(controller: AppController, date: LocalDate, onDismiss: () -> Unit) {
     val existing = controller.data.reviews.firstOrNull { it.date == date.toString() }
     var content by remember(date, existing?.id) { mutableStateOf(existing?.content ?: controller.smartEngine.dailyReview(controller.data, date)) }
+    var isGenerating by remember(date) { mutableStateOf(false) }
+    var aiNotice by remember(date) { mutableStateOf<String?>(null) }
+    var generatedOnce by remember(date, existing?.id) { mutableStateOf(existing != null) }
+    val scope = rememberCoroutineScope()
+    fun generate() {
+        if (isGenerating) return
+        isGenerating = true
+        aiNotice = null
+        scope.launch {
+            val result = controller.generateDailyReview(date)
+            content = result.value
+            aiNotice = result.notice ?: if (result.usedRemoteModel) "已由真实模型加入基于记录的观察与主观感受。" else null
+            isGenerating = false
+            generatedOnce = true
+        }
+    }
+    LaunchedEffect(date, existing?.id) {
+        if (existing == null && !generatedOnce) generate()
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("${friendlyDate(date.toString())} · 每日复盘") },
         text = {
             Column {
-                Text("基于当天任务生成，可修改后保存；超过 8 小时的安排会附加休息提醒。", style = MaterialTheme.typography.bodyMedium, color = Muted)
+                Text("基于当天记录生成，并加入有依据的主观观察；内容可修改后保存。", style = MaterialTheme.typography.bodyMedium, color = Muted)
+                if (isGenerating) {
+                    Spacer(Modifier.height(9.dp))
+                    LinearProgressIndicator(Modifier.fillMaxWidth(), color = Ink)
+                    Text("正在生成更有温度的复盘…", style = MaterialTheme.typography.labelMedium, color = Muted)
+                }
+                aiNotice?.let {
+                    Spacer(Modifier.height(7.dp))
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = if (it.startsWith("已由")) Success else Muted)
+                }
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = content,
@@ -146,9 +200,13 @@ private fun DailyReviewDialog(controller: AppController, date: LocalDate, onDism
                     shape = RoundedCornerShape(16.dp),
                     textStyle = MaterialTheme.typography.bodyMedium,
                 )
+                Spacer(Modifier.height(6.dp))
+                TextButton(onClick = { generate() }, enabled = !isGenerating) {
+                    Text(if (existing == null) "重新生成" else "用 AI 重新生成")
+                }
             }
         },
-        confirmButton = { TextButton(onClick = { controller.saveDailyReview(date, content); onDismiss() }) { Text(if (existing == null) "保存复盘" else "更新复盘") } },
+        confirmButton = { TextButton(onClick = { controller.saveDailyReview(date, content); onDismiss() }, enabled = !isGenerating) { Text(if (existing == null) "保存复盘" else "更新复盘") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
@@ -157,7 +215,7 @@ private fun DailyReviewDialog(controller: AppController, date: LocalDate, onDism
 private fun ChatBubble(
     message: ChatMessage,
     onCitation: (Citation) -> Unit,
-    onConfirmDraft: (CaptureDraft) -> Unit,
+    onEditDraft: (CaptureDraft) -> Unit,
 ) {
     val alignment = if (message.fromUser) Alignment.End else Alignment.Start
     Column(Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
@@ -203,15 +261,21 @@ private fun ChatBubble(
         }
         if (reply?.taskDraft != null) {
             Spacer(Modifier.height(8.dp))
-            ZCard(modifier = Modifier.widthIn(max = 330.dp), color = Lime.copy(alpha = .45f)) {
+            ZCard(modifier = Modifier.widthIn(max = 330.dp), color = Lime.copy(alpha = .45f), onClick = { onEditDraft(reply.taskDraft) }) {
                 Tag("操作预览", Ink, Color.White)
                 Spacer(Modifier.height(10.dp))
                 Text(reply.taskDraft.title, style = MaterialTheme.typography.titleMedium)
                 reply.taskDraft.dueDate?.let { Text("截止 ${friendlyDate(it)}", style = MaterialTheme.typography.bodyMedium, color = Muted) }
+                Text(
+                    if (reply.taskDraft.isTodo) "待办 · ${if (reply.taskDraft.urgent) "紧急" else "不紧急"} · ${if (reply.taskDraft.important) "重要" else "不重要"}"
+                    else "日程 · ${reply.taskDraft.scheduledTime ?: "09:00"} · ${reply.taskDraft.durationInput}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Muted,
+                )
                 Spacer(Modifier.height(12.dp))
-                PrimaryButton("确认创建任务", onClick = { onConfirmDraft(reply.taskDraft) }, modifier = Modifier.fillMaxWidth())
+                PrimaryButton("进入详细编辑", onClick = { onEditDraft(reply.taskDraft) }, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(7.dp))
-                Text("只有点击确认后才会写入", style = MaterialTheme.typography.labelMedium, color = Muted, modifier = Modifier.align(Alignment.CenterHorizontally))
+                Text("检查日期、时间和优先级，保存后才会写入", style = MaterialTheme.typography.labelMedium, color = Muted, modifier = Modifier.align(Alignment.CenterHorizontally))
             }
         }
     }

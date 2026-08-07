@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.selavie.zhixing.AppController
@@ -163,6 +164,9 @@ fun ProfileScreen(
     var confirmDelete by remember { mutableStateOf(false) }
     var undoMessage by remember { mutableStateOf<String?>(null) }
     var invalidDate by remember { mutableStateOf(false) }
+    var aiGatewayUrl by remember(current.aiGatewayUrl) { mutableStateOf(current.aiGatewayUrl) }
+    var aiAccessToken by remember(current.aiAccessToken) { mutableStateOf(current.aiAccessToken) }
+    var aiConfigMessage by remember { mutableStateOf<String?>(null) }
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("ME", "个人信息", "资料、隐私与本地数据", onBack = onBack)
@@ -213,6 +217,69 @@ fun ProfileScreen(
                             saved = true
                         }
                     }, modifier = Modifier.fillMaxWidth(), enabled = !saved)
+                }
+            }
+            item {
+                SectionTitle("真实模型")
+                Spacer(Modifier.height(8.dp))
+                ZCard(color = if (controller.isRemoteAiConfigured()) Lime.copy(alpha = .25f) else Color.White) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(9.dp).clip(CircleShape).background(if (controller.isRemoteAiConfigured()) Success else Muted),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (controller.isRemoteAiConfigured()) "AI 网关已配置" else "当前使用离线助手",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = aiGatewayUrl,
+                        onValueChange = { aiGatewayUrl = it; aiConfigMessage = null },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("AI 网关完整地址") },
+                        placeholder = { Text("https://…workers.dev/v1/assistant") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = aiAccessToken,
+                        onValueChange = { aiAccessToken = it; aiConfigMessage = null },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("应用访问令牌（可选）") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        shape = RoundedCornerShape(14.dp),
+                    )
+                    Spacer(Modifier.height(9.dp))
+                    Text(
+                        "这里只填写你自己网关的访问令牌。DeepSeek API Key 必须保存在服务端，不能填入手机或提交到仓库。",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Muted,
+                    )
+                    aiConfigMessage?.let {
+                        Spacer(Modifier.height(7.dp))
+                        Text(it, style = MaterialTheme.typography.labelMedium, color = if (it.startsWith("已")) Success else Coral)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    PrimaryButton(
+                        "保存 AI 配置",
+                        onClick = {
+                            val url = aiGatewayUrl.trim()
+                            if (url.isNotBlank() && !url.startsWith("https://")) {
+                                aiConfigMessage = "网关必须使用 HTTPS；清空地址可关闭真实模型。"
+                            } else {
+                                controller.updatePreferences(controller.data.preferences.copy(
+                                    aiGatewayUrl = url,
+                                    aiAccessToken = aiAccessToken.trim(),
+                                ))
+                                aiConfigMessage = if (url.isBlank()) "已关闭真实模型，继续使用离线助手。" else "已保存，下一次提问将调用真实模型。"
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
             item {

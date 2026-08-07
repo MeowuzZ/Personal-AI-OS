@@ -4,6 +4,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.selavie.zhixing.data.AppRepository
+import com.selavie.zhixing.data.AiGatewayClient
+import com.selavie.zhixing.data.HttpAiGatewayClient
 import com.selavie.zhixing.data.SmartEngine
 import com.selavie.zhixing.model.*
 import java.time.LocalDate
@@ -13,6 +15,7 @@ import java.time.LocalTime
 class AppController(
     private val repository: AppRepository,
     val smartEngine: SmartEngine = SmartEngine(),
+    private val aiGateway: AiGatewayClient = HttpAiGatewayClient(),
 ) {
     var data by mutableStateOf(repository.load())
         private set
@@ -105,19 +108,7 @@ class AppController(
 
     fun handleCapture(draft: CaptureDraft) {
         when (draft.type) {
-            ItemType.TASK -> {
-                val date = draft.dueDate ?: LocalDate.now().toString()
-                val isTodo = "待办" in draft.rawContent
-                addTask(TaskItem(
-                    title = draft.title,
-                    isTodo = isTodo,
-                    dueDate = date,
-                    endDate = date,
-                    scheduledTime = if (isTodo) null else LocalTime.now().withSecond(0).withNano(0).toString().take(5),
-                    durationInput = if (isTodo) "" else "30分钟",
-                    content = draft.rawContent,
-                ))
-            }
+            ItemType.TASK -> addTask(draft.toTaskItem())
             ItemType.NOTE -> addDiary(DiaryEntry(title = draft.title.take(24), content = draft.rawContent))
             ItemType.EVENT -> addEvent(CalendarEvent(
                 title = draft.title,
@@ -157,6 +148,47 @@ class AppController(
     }
 
     fun updatePreferences(value: UserPreferences) = commit(data.copy(preferences = value))
+
+    fun isRemoteAiConfigured(): Boolean = data.preferences.aiGatewayUrl.trim().startsWith("http")
+
+    suspend fun askAssistant(question: String): AiOperationResult<AssistantReply> {
+        val local = { smartEngine.ask(question, data) }
+        if (!isRemoteAiConfigured()) {
+            return AiOperationResult(local(), false, "尚未配置真实模型网关，当前使用离线助手。")
+        }
+        return runCatching { aiGateway.ask(question, data) }
+            .fold(
+                onSuccess = { AiOperationResult(it, true) },
+                onFailure = {
+                    AiOperationResult(
+                        value = local(),
+                        usedRemoteModel = false,
+                        notice = "真实模型连接失败，已切换到离线助手：${it.message?.take(80) ?: "未知错误"}",
+                    )
+                },
+            )
+    }
+
+    suspend fun generateDailyReview(date: LocalDate): AiOperationResult<String> {
+        val local = smartEngine.dailyReview(data, date)
+        if (!data.preferences.includeTasksInAi) {
+            return AiOperationResult(local, false, "任务 AI 权限已关闭，复盘未上传并使用本地分析。")
+        }
+        if (!isRemoteAiConfigured()) {
+            return AiOperationResult(local, false, "尚未配置真实模型网关，当前使用本地复盘。")
+        }
+        return runCatching { aiGateway.review(data, date, local) }
+            .fold(
+                onSuccess = { AiOperationResult(it, true) },
+                onFailure = {
+                    AiOperationResult(
+                        value = local,
+                        usedRemoteModel = false,
+                        notice = "真实模型连接失败，已保留本地复盘：${it.message?.take(80) ?: "未知错误"}",
+                    )
+                },
+            )
+    }
 
     fun undoLatest(): Boolean {
         val latest = data.audits.firstOrNull { it.undoable && it.beforeJson != null } ?: return false

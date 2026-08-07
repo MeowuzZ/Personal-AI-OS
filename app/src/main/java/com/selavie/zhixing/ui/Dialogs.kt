@@ -109,7 +109,7 @@ fun CaptureDialog(engine: SmartEngine, onDismiss: () -> Unit, onConfirm: (Captur
 }
 
 @Composable
-fun TaskEditorDialog(task: TaskItem?, onDismiss: () -> Unit, onSave: (TaskItem) -> Unit) {
+fun TaskEditorDialog(task: TaskItem?, onDismiss: () -> Unit, isNew: Boolean = task == null, onSave: (TaskItem) -> Unit) {
     val engine = remember { SmartEngine() }
     var title by remember(task?.id) { mutableStateOf(task?.title.orEmpty()) }
     var isTodo by remember(task?.id) { mutableStateOf(task?.isTodo ?: false) }
@@ -139,7 +139,7 @@ fun TaskEditorDialog(task: TaskItem?, onDismiss: () -> Unit, onSave: (TaskItem) 
         content = content.trim(),
         tags = tags.split(',', '，').map(String::trim).filter(String::isNotBlank).distinct(),
     )
-    DialogShell(if (task == null) "新建任务" else "编辑任务", "勾选待办后只需设置日期范围；未勾选则作为占用时间条的日程。", onDismiss) {
+    DialogShell(if (isNew) "新建任务" else "编辑任务", "勾选待办后只需设置日期范围；未勾选则作为占用时间条的日程。", onDismiss) {
         OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("任务标题") }, singleLine = true, shape = RoundedCornerShape(14.dp))
         Spacer(Modifier.height(14.dp))
         Row(
@@ -191,7 +191,7 @@ fun TaskEditorDialog(task: TaskItem?, onDismiss: () -> Unit, onSave: (TaskItem) 
         }
         Spacer(Modifier.height(18.dp))
         PrimaryButton(
-            if (task == null) "创建任务" else "保存修改",
+            if (isNew) "创建任务" else "保存修改",
             onClick = {
                 val date = due.toLocalDateOrNull()
                 val end = if (isTodo) endDate.toLocalDateOrNull() else date

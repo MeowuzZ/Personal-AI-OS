@@ -19,6 +19,20 @@ class SmartEngineTest {
     }
 
     @Test
+    fun `capture extracts schedule details for editable task draft`() {
+        val draft = engine.parseCapture("明天下午3点完成重要报告2小时", today)
+        assertEquals(ItemType.TASK, draft.type)
+        assertEquals("2026-08-06", draft.dueDate)
+        assertEquals("15:00", draft.scheduledTime)
+        assertEquals(120, draft.estimateMinutes)
+        assertFalse(draft.isTodo)
+
+        val task = draft.toTaskItem()
+        assertEquals("15:00", task.scheduledTime)
+        assertEquals(120, task.estimateMinutes)
+    }
+
+    @Test
     fun `assistant answers with personal source citation`() {
         val note = DiaryEntry(title = "安卓 MVP", content = "安卓版本采用离线优先设计，并保留操作确认。")
         val reply = engine.ask("安卓版本采用什么设计？", AppData(diaries = listOf(note)))
@@ -160,5 +174,7 @@ class SmartEngineTest {
         val review = engine.dailyReview(data, today)
         assertTrue(review.contains("超过 8 小时"))
         assertTrue(review.contains("休息"))
+        assertTrue(review.contains("一点感受"))
+        assertTrue(review.contains("我感"))
     }
 }

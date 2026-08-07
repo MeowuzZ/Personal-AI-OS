@@ -1,15 +1,15 @@
 # 知行 · Personal AI OS Android
 
-根据 `docs/prd/01-personal-ai-os.md` 实现的离线优先安卓应用。它面向个人日常使用，将任务、日程、日记、长期目标、个人信息、可信助手和每日复盘放在同一套本地数据中。
+根据 `docs/prd/01-personal-ai-os.md` 实现的本地数据优先安卓应用。它面向个人日常使用，将任务、日程、日记、长期目标、个人信息、真实大模型助手和每日复盘放在同一套体验中。
 
-当前版本：**v0.4.0**
+当前版本：**v0.5.1**
 
 ## 下载与安装
 
 前往 [GitHub Releases](https://github.com/MeowuzZ/Personal-AI-OS/releases/latest)，在 **Assets** 中下载与版本号对应的 APK，例如：
 
 ```text
-Personal-AI-OS-v0.4.0.apk
+Personal-AI-OS-v0.5.1.apk
 ```
 
 下载后在安卓手机上打开 APK；首次安装时需要允许浏览器或文件管理器“安装未知应用”。Release 同时提供 `.sha256` 文件用于校验下载完整性。
@@ -17,10 +17,28 @@ Personal-AI-OS-v0.4.0.apk
 在电脑上将 APK 和 `.sha256` 文件下载到同一目录后，可执行：
 
 ```bash
-shasum -a 256 -c Personal-AI-OS-v0.4.0.apk.sha256
+shasum -a 256 -c Personal-AI-OS-v0.5.1.apk.sha256
 ```
 
 ## 更新日志
+
+### v0.5.1 · 2026-08-07
+
+- 将真实模型网关从 OpenAI Responses API 切换为 DeepSeek Chat Completions API，默认使用经济、快速的 `deepseek-v4-flash` 非思考模式。
+- 使用 DeepSeek JSON Output 返回问答、引用和任务草稿，并在网关与安卓端进行双重字段校验；模型返回空内容或异常时继续使用离线助手。
+- DeepSeek API Key 仅通过 Cloudflare Secret `DEEPSEEK_API_KEY` 注入，不写入 APK、应用配置、README、JSON 导出或 Git 历史。
+- 网关新增合法引用过滤、日期时间格式检查、任务草稿规范化、响应长度错误提示和健康检查中的供应商标识。
+- 更新 DeepSeek 网关部署、密钥轮换和隐私说明；调试 APK 构建和单元测试通过。
+
+### v0.5.0 · 2026-08-07
+
+- AI 助手接入可配置的真实大模型网关，支持异步问答，并在未配置或网络异常时明确切换到离线规则引擎。
+- 每日复盘新增基于当日记录的主观观察，引导用户感受生活节奏与取舍；真实模型不可用时，本地复盘仍会生成不虚构事实的“一点感受”。
+- 支持用自然语言解析任务标题、日期、时间、持续时间、待办类型、紧急/重要程度、内容和标签。
+- 模型只生成操作预览；点击任务草稿会进入完整任务编辑卡片，用户检查并保存后才会正式写入。
+- 个人信息页新增 AI 网关地址、应用访问令牌和连接状态设置，原有任务、日记、目标 AI 数据权限继续生效。
+- 新增可部署的 Cloudflare Workers OpenAI 安全网关，默认使用 `gpt-5.6-terra` 和 Responses API 结构化输出；API Key 仅保存在服务端 Secret 中。
+- 应用新增网络权限，但不会把 OpenAI API Key 写入 APK、仓库或 JSON 数据导出；调试 APK 构建和单元测试通过。
 
 ### v0.4.0 · 2026-08-06
 
@@ -77,14 +95,35 @@ shasum -a 256 -c Personal-AI-OS-v0.4.0.apk.sha256
 - 任务视图：列表、14 天时间条与自定义标签分类视图；日程以深灰色占用时间条，待办只在日期范围内的每日列表展示。
 - 目标：独立于日程的长期目标系统，主任务和子任务均可标记；主任务取消完成会恢复子任务原进度，进度条和百分比同步平滑动画。
 - 日记：月历浏览、统一文本模板、自定义标题、本地记录时间、绿色日期标记、编辑和二次确认删除。
-- Assistant：本地检索任务/日记/目标，回答附带可打开的来源片段；可生成任务草稿。
-- 每日复盘：在助手中生成当天完成清单；安排超过 8 小时会附加休息提醒，保存后可从日历回看。
-- 个人信息：姓名、性别符号、生日、醒目座右铭、AI 权限、执行记录和数据管理；座右铭同时显示在底部导航栏最下方。
+- Assistant：通过安全网关调用真实模型，支持简单问答与个人数据来源引用；自然语言可解析为任务草稿，点击后进入完整表单编辑确认，连接失败时自动使用离线助手。
+- 每日复盘：在助手中生成当天完成清单和有依据的主观观察；安排超过 8 小时会附加休息提醒，保存后可从日历回看。
+- 个人信息：姓名、性别符号、生日、醒目座右铭、真实模型网关、AI 数据权限、执行记录和数据管理；座右铭同时显示在底部导航栏最下方。
 - 生日提醒：读取设备本地时间，在生日当天上午 8:00 发送本地通知。
 - 隐私开关、JSON 全量导出、执行日志、撤销和二次确认清空。
 - 首次启动可选择空白空间或隔离的演示数据。
 
-应用不声明网络权限，当前数据全部保存在 Android `SharedPreferences` 中。真正的云端大模型、邮箱账号和外部日历同步需要安全后端，未在 APK 中硬编码密钥。
+个人数据仍保存在 Android `SharedPreferences` 中。只有在用户配置 AI 网关并主动提问或生成复盘时，应用才会按“AI 数据权限”开关发送允许的数据；DeepSeek API Key 不会进入 APK。
+
+## 连接真实大模型
+
+出于密钥安全考虑，安卓端不能直接持有 DeepSeek API Key。项目在 [`backend/deepseek-gateway`](backend/deepseek-gateway/) 提供了 Cloudflare Workers 网关，调用 DeepSeek Chat Completions API，并通过 JSON Output 和本地字段校验返回稳定的问答、引用和任务草稿结构。默认模型为 `deepseek-v4-flash`。
+
+```bash
+cd backend/deepseek-gateway
+npm install
+npx wrangler login
+npx wrangler secret put DEEPSEEK_API_KEY
+openssl rand -hex 32
+npx wrangler secret put APP_ACCESS_TOKEN
+npm run deploy
+```
+
+部署成功后，在应用“个人信息 → 真实模型”填写：
+
+- `https://你的-worker.workers.dev/v1/assistant`
+- 你设置的 `APP_ACCESS_TOKEN`；不要填写 DeepSeek API Key
+
+详细部署、健康检查、密钥轮换和隐私边界见 [`backend/deepseek-gateway/README.md`](backend/deepseek-gateway/README.md)。DeepSeek 官方要求通过 Bearer API Key 鉴权，当前模型和 JSON Output 用法参见 [DeepSeek API 文档](https://api-docs.deepseek.com/api/create-chat-completion) 与 [JSON Output 指南](https://api-docs.deepseek.com/zh-cn/guides/json_mode/)。
 
 ## 开发环境
 
@@ -102,6 +141,7 @@ shasum -a 256 -c Personal-AI-OS-v0.4.0.apk.sha256
 │   └── src/
 │       ├── main/                # Kotlin、Compose UI、资源与 Manifest
 │       └── test/                # 单元测试
+├── backend/deepseek-gateway/    # 调用 DeepSeek 的安全服务端网关
 ├── docs/prd/                    # 产品需求文档
 ├── gradle/wrapper/              # 可复现的 Gradle Wrapper
 ├── signing/                     # 公开、版本化的 Android 发布签名
@@ -143,11 +183,14 @@ $ANDROID_HOME/platform-tools/adb install -r app/build/outputs/apk/debug/app-debu
 3. 在任务页用滚轮选择日期和时间，并用“2小时30分钟”等自然语言填写持续时间。
 4. 任何页面点击右下角“+”，可快速输入自然语言并检查解析预览。
 5. 在日记月历中记录当天内容，按需设置统一模板，随后可在助手中用自然语言检索。
-6. 每晚在助手中编辑每日复盘，保存后可从对应日期的日历回看。
-7. 定期在个人信息页导出 JSON 备份。
+6. 如需真实模型，先部署安全网关，再到“个人信息 → 真实模型”填写网关地址和应用访问令牌。
+7. 在助手中提问，或输入“创建任务：明天下午 3 点写报告 2 小时”；打开生成的草稿卡片检查并保存。
+8. 每晚在助手中编辑每日复盘，保存后可从对应日期的日历回看。
+9. 定期在个人信息页导出 JSON 备份；导出内容不会包含 AI 网关访问令牌。
 
 ## 当前边界
 
-- 本地助手是可解释的关键词/规则引擎，不会假装成云端大模型。
+- 真实模型需要用户自行部署并配置网关；未配置或连接失败时，界面会明确提示正在使用可解释的本地关键词/规则引擎。
+- 示例网关面向个人使用；若开放给多用户，仍需增加账号隔离、限流、额度控制和审计。
 - 除生日提醒和应用内逾期弹窗外，暂无普通任务系统通知、邮箱登录、多设备同步、外部日历同步和语义向量检索。
 - 数据量较大或需要跨设备时，下一阶段应迁移到 Room 数据库，并新增带用户隔离的后端服务。
